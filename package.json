@@ -1,0 +1,25 @@
+{
+  "name": "cm360-end-of-month-audit",
+  "version": "1.0.0",
+  "description": "CM360 End of Month Audit system with Google Apps Script integration",
+  "main": "Code.gs",
+  "scripts": {
+    "deploy": "clasp push && clasp deploy",
+    "push": "clasp push",
+    "pull": "clasp pull"
+  },
+  "keywords": [
+    "google-apps-script",
+    "cm360", 
+    "audit",
+    "gmail",
+    "spreadsheet",
+    "automation"
+  ],
+  "author": "BK Platform Solutions",
+  "license": "MIT",
+  "devDependencies": {
+    "@google/clasp": "^2.4.1",
+    "@types/google-apps-script": "^1.0.0"
+  }
+}
