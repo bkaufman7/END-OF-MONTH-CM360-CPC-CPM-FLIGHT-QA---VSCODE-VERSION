@@ -143,156 +143,22 @@ function importDCMReports() {
   }
 }
 
-// ====== CASCADING TRIGGER SYSTEM ======
-
-const CASCADE_STATE_KEY = 'cascade_progress_v1';
-const CASCADE_TRIGGER_PREFIX = 'cascade_';
-
 // ====== Chunked QA execution control ======
 const QA_CHUNK_ROWS = 3500;
 const QA_TIME_BUDGET_MS = 4.2 * 60 * 1000;
-const QA_STATE_KEY = 'qa_progress_v2';
+const QA_STATE_KEY = 'qa_progress_v2';      // DocumentProperties key
 
-const QA_TRIGGER_KEY = 'qa_chunk_trigger_id';
-const QA_LOCK_KEY = 'qa_chunk_lock';
+// --- Auto-resume trigger control for QA chunks ---
+const QA_TRIGGER_KEY = 'qa_chunk_trigger_id';   // ScriptProperties key for one-shot trigger
+const QA_LOCK_KEY = 'qa_chunk_lock';            // logical name only
 
 function getScriptProps_() { return PropertiesService.getScriptProperties(); }
 
-// --- CASCADE TRIGGER MANAGEMENT ---
-function clearAllCascadeTriggers_() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(function(trigger) {
-    const funcName = trigger.getHandlerFunction();
-    if (funcName.startsWith('run') && (funcName.includes('Ingestion') || funcName.includes('QAProcessing') || funcName.includes('EmailReporting'))) {
-      ScriptApp.deleteTrigger(trigger);
-      Logger.log('🗑️ Removed trigger: ' + funcName);
-    }
-  });
-}
-
-function scheduleCascadeTrigger_(functionName, delayMinutes) {
-  // Clear any existing trigger for this function
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === functionName) {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-  
-  // Create new trigger
-  const newTrigger = ScriptApp.newTrigger(functionName)
-    .timeBased()
-    .after(delayMinutes * 60 * 1000)
-    .create();
-    
-  Logger.log('⏰ Scheduled ' + functionName + ' in ' + delayMinutes + ' minutes');
-  return newTrigger.getUniqueId();
-}
-
-function setCascadeState_(step, status, data) {
-  const state = {
-    currentStep: step,
-    status: status,
-    timestamp: new Date().toISOString(),
-    data: data || {}
-  };
-  PropertiesService.getDocumentProperties().setProperty(CASCADE_STATE_KEY, JSON.stringify(state));
-}
-
-function getCascadeState_() {
-  const raw = PropertiesService.getDocumentProperties().getProperty(CASCADE_STATE_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-// --- CASCADE STEP 1: DATA INGESTION ---
-function runDataIngestion() {
-  try {
-    setCascadeState_('ingestion', 'started');
-    Logger.log('🚀 CASCADE STEP 1: Data Ingestion - START');
-    
-    // Trim sheets and import data
-    trimAllSheetsToData_();
-    importDCMReports();
-    
-    setCascadeState_('ingestion', 'completed');
-    Logger.log('✅ CASCADE STEP 1: Data Ingestion - COMPLETED');
-    
-    // Schedule next step
-    scheduleCascadeTrigger_('runQAProcessing', 15); // 15 minutes later
-    
-  } catch (error) {
-    setCascadeState_('ingestion', 'failed', { error: error.toString() });
-    Logger.log('❌ CASCADE STEP 1: Data Ingestion - FAILED: ' + error.toString());
-    
-    // Still proceed to QA step in case of partial success
-    scheduleCascadeTrigger_('runQAProcessing', 20); // 20 minutes later with extra buffer
-  }
-}
-
-// --- CASCADE STEP 2: QA PROCESSING ---
-function runQAProcessing() {
-  try {
-    setCascadeState_('qa', 'started');
-    Logger.log('🚀 CASCADE STEP 2: QA Processing - START');
-    
-    // Run QA (this will handle chunking automatically)
-    runQAOnly();
-    
-    // Send performance alerts if pre-15th
-    sendPerformanceSpikeAlertIfPre15();
-    
-    // Check if QA is truly complete
-    const qaState = getQAState_();
-    if (qaState && qaState.session) {
-      // QA is still running in chunks, let it complete first
-      Logger.log('⏳ CASCADE STEP 2: QA still chunking, will wait for completion');
-      setCascadeState_('qa', 'chunking');
-      // Don't schedule email yet - QA chunking will handle final step
-      return;
-    }
-    
-    setCascadeState_('qa', 'completed');
-    Logger.log('✅ CASCADE STEP 2: QA Processing - COMPLETED');
-    
-    // Schedule final step
-    scheduleCascadeTrigger_('runEmailReporting', 15); // 15 minutes later
-    
-  } catch (error) {
-    setCascadeState_('qa', 'failed', { error: error.toString() });
-    Logger.log('❌ CASCADE STEP 2: QA Processing - FAILED: ' + error.toString());
-    
-    // Still proceed to email step for any available data
-    scheduleCascadeTrigger_('runEmailReporting', 20);
-  }
-}
-
-// --- CASCADE STEP 3: EMAIL REPORTING ---
-function runEmailReporting() {
-  try {
-    setCascadeState_('email', 'started');
-    Logger.log('🚀 CASCADE STEP 3: Email Reporting - START');
-    
-    // Send email summary (has built-in >15th filter)
-    sendEmailSummary();
-    
-    setCascadeState_('email', 'completed');
-    Logger.log('✅ CASCADE STEP 3: Email Reporting - COMPLETED');
-    Logger.log('🏁 CASCADE COMPLETE: All steps finished');
-    
-    // Clear cascade state
-    PropertiesService.getDocumentProperties().deleteProperty(CASCADE_STATE_KEY);
-    
-  } catch (error) {
-    setCascadeState_('email', 'failed', { error: error.toString() });
-    Logger.log('❌ CASCADE STEP 3: Email Reporting - FAILED: ' + error.toString());
-  }
-}
-
-// Enhanced QA chunking with cascade awareness
 function scheduleNextQAChunk_(minutesFromNow) {
-  minutesFromNow = Math.max(1, Math.min(10, Math.floor(minutesFromNow || 1)));
+  minutesFromNow = Math.max(1, Math.min(10, Math.floor(minutesFromNow || 1))); // 1..10 min
   const props = getScriptProps_();
 
+  // If a trigger is already scheduled, do nothing (unless it no longer exists)
   const existingId = props.getProperty(QA_TRIGGER_KEY);
   if (existingId) {
     const stillThere = ScriptApp.getProjectTriggers().some(function(t){ return t.getUniqueId() === existingId; });
@@ -301,29 +167,12 @@ function scheduleNextQAChunk_(minutesFromNow) {
   }
 
   const trig = ScriptApp
-    .newTrigger('runQAChunkAndCheckComplete')  // Modified to check cascade state
+    .newTrigger('runQAOnly')      // re-enter same function
     .timeBased()
     .after(minutesFromNow * 60 * 1000)
     .create();
 
   props.setProperty(QA_TRIGGER_KEY, trig.getUniqueId());
-}
-
-// Enhanced QA chunk runner that integrates with cascade
-function runQAChunkAndCheckComplete() {
-  runQAOnly(); // Run the QA chunk
-  
-  // Check if QA is complete
-  const qaState = getQAState_();
-  if (!qaState || !qaState.session) {
-    // QA is complete, check if we're in a cascade
-    const cascadeState = getCascadeState_();
-    if (cascadeState && cascadeState.currentStep === 'qa' && cascadeState.status === 'chunking') {
-      Logger.log('🔄 QA chunking complete, resuming cascade');
-      setCascadeState_('qa', 'completed');
-      scheduleCascadeTrigger_('runEmailReporting', 5); // Quick transition to email
-    }
-  }
 }
 
 function cancelQAChunkTrigger_() {
@@ -590,28 +439,1190 @@ function sendPerformanceSpikeAlertIfPre15() {
   compactPerfAlertCache_(35);
 }
 
-// --- CONTINUATION OF FULL IMPLEMENTATION ---
-// Note: This is a partial implementation - copy your complete original code here
-// including all the remaining functions:
-// - runQAOnly (chunked QA processing)
-// - sendEmailSummary (email reporting system)  
-// - Low-priority classification patterns
-// - Owner resolution functions
-// - Violation tracking functions
-// - trimAllSheetsToData_
-// - All helper functions
 
-// Placeholder for remaining implementation
+
+
+// ===== Violation last-change cache (sidecar workbook, retry & batched) =====
+function withBackoff_(fn, label, maxTries) {
+  label = label || "op";
+  maxTries = maxTries || 5;
+  let wait = 250;
+  for (let i = 1; i <= maxTries; i++) {
+    try { return fn(); } catch (e) {
+      if (i === maxTries) throw e;
+      Utilities.sleep(wait);
+      wait = Math.min(wait * 2, 4000);
+    }
+  }
+}
+
+function getVChangeBook_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const id = props.getProperty('vChangeBookId');
+    if (id) return withBackoff_(function(){ return SpreadsheetApp.openById(id); }, "open sidecar");
+    const book = withBackoff_(function(){ return SpreadsheetApp.create("_CM360_QA_VChangeCache_" + Date.now()); }, "create sidecar");
+    props.setProperty('vChangeBookId', book.getId());
+    return book;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getVChangeSheet_() {
+  const book = getVChangeBook_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    let sh = withBackoff_(function(){ return book.getSheetByName("_Violation Change Cache"); }, "get sheet");
+    if (!sh) {
+      sh = withBackoff_(function(){ return book.insertSheet("_Violation Change Cache"); }, "insert sheet");
+      withBackoff_(function(){ sh.hideSheet(); }, "hide sheet");
+    }
+    const header = ["key","pe","lastReport","lastImp","lastClk","lastImpChange","lastClkChange"];
+    const cur = withBackoff_(function(){ return (sh.getRange(1,1,1,header.length).getValues()[0] || []); }, "read header");
+    const ok = header.every(function(h,i){ return String(cur[i]||"").toLowerCase()===h.toLowerCase(); });
+    if (!ok) withBackoff_(function(){ sh.getRange(1,1,1,header.length).setValues([header]); }, "write header");
+    return sh;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function migrateViolationPropsToSheetOnce_() {
+  const propsDoc = PropertiesService.getDocumentProperties();
+  const raw = propsDoc.getProperty('violationChangeMap');
+  if (!raw) return;
+  let obj; try { obj = JSON.parse(raw); } catch(e) { obj = {}; }
+  saveViolationChangeMap_(obj);
+  propsDoc.deleteProperty('violationChangeMap');
+}
+
+function loadViolationChangeMap_() {
+  migrateViolationPropsToSheetOnce_();
+  const sh = getVChangeSheet_();
+  const lastRow = withBackoff_(function(){ return sh.getLastRow(); }, "getLastRow");
+  if (lastRow <= 1) return {};
+  const vals = withBackoff_(function(){ return sh.getRange(2,1,lastRow-1,7).getValues(); }, "read cache rows");
+  const map = {};
+  for (let i = 0; i < vals.length; i++) {
+    const r = vals[i];
+    const key = String(r[0] || "").trim();
+    if (!key) continue;
+    map[key] = {
+      key:            key,
+      pe:            r[1] ? String(r[1]) : null,
+      lastReport:    r[2] ? String(r[2]) : null,
+      lastImp:       Number(r[3] || 0),
+      lastClk:       Number(r[4] || 0),
+      lastImpChange: r[5] ? String(r[5]) : null,
+      lastClkChange: r[6] ? String(r[6]) : null
+    };
+  }
+  return map;
+}
+
+function saveViolationChangeMap_(mapObj) {
+  const sh = getVChangeSheet_();
+  const keys = Object.keys(mapObj).sort();
+  const rows = new Array(keys.length);
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    const r = mapObj[k] || {};
+    rows[i] = [
+      k,
+      r.pe || null,
+      r.lastReport || null,
+      Number(r.lastImp || 0),
+      Number(r.lastClk || 0),
+      r.lastImpChange || null,
+      r.lastClkChange || null
+    ];
+  }
+
+  const COLS = 7;
+  const last = withBackoff_(function(){ return sh.getLastRow(); }, "getLastRow before clear");
+  if (last > 1) withBackoff_(function(){ sh.getRange(2,1,last-1,COLS).clearContent(); }, "clear body");
+
+  if (!rows.length) {
+    PropertiesService.getDocumentProperties().deleteProperty('violationChangeMap');
+    return;
+  }
+
+  const BATCH = 10000;
+  for (let start = 0; start < rows.length; start += BATCH) {
+    const chunk = rows.slice(start, start + BATCH);
+    withBackoff_(function(){ sh.getRange(2 + start, 1, chunk.length, COLS).setValues(chunk); }, "write batch");
+    Utilities.sleep(50);
+  }
+
+  PropertiesService.getDocumentProperties().deleteProperty('violationChangeMap');
+}
+
+function cleanupViolationCache_(mapObj, today) {
+  for (const k in mapObj) {
+    if (!mapObj.hasOwnProperty(k)) continue;
+    const r = mapObj[k];
+    const pe  = r.pe ? new Date(r.pe) : null;
+    const lic = r.lastImpChange ? new Date(r.lastImpChange) : null;
+    const lcc = r.lastClkChange ? new Date(r.lastClkChange) : null;
+    if (pe && today > pe) {
+      const impOk = !lic || lic <= pe;
+      const clkOk = !lcc || lcc <= pe;
+      if (impOk && clkOk) delete mapObj[k];
+    }
+  }
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000);
+  for (const k2 in mapObj) {
+    if (!mapObj.hasOwnProperty(k2)) continue;
+    const r2 = mapObj[k2];
+    const lr = r2.lastReport ? new Date(r2.lastReport) : null;
+    if (lr && lr < ninetyDaysAgo) delete mapObj[k2];
+  }
+  const remaining = Object.keys(mapObj).map(function(k3){
+    const v = mapObj[k3];
+    return [k3, v.lastReport ? new Date(v.lastReport).getTime() : 0];
+  }).sort(function(a,b){ return b[1]-a[1]; });
+
+  const MAX = 150000;
+  if (remaining.length > MAX) {
+    for (let i = MAX; i < remaining.length; i++) delete mapObj[remaining[i][0]];
+  }
+}
+
+function upsertViolationChange_(mapObj, key, rd, imp, clk, pe) {
+  const rdISO = rd ? Utilities.formatDate(rd, Session.getScriptTimeZone(), "yyyy-MM-dd") : null;
+  const peISO = pe ? Utilities.formatDate(pe, Session.getScriptTimeZone(), "yyyy-MM-dd") : null;
+
+  let rec = mapObj[key];
+  if (!rec) {
+    rec = mapObj[key] = {
+      key: key,
+      pe: peISO,
+      lastReport: rdISO,
+      lastImp: Number(imp || 0),
+      lastClk: Number(clk || 0),
+      lastImpChange: rdISO,
+      lastClkChange: rdISO
+    };
+  } else {
+    if (peISO && peISO !== rec.pe) rec.pe = peISO;
+    if (!rec.lastReport || (rdISO && rdISO > rec.lastReport)) rec.lastReport = rdISO;
+    if (typeof imp === "number" && imp !== Number(rec.lastImp || 0)) {
+      rec.lastImp = Number(imp);
+      rec.lastImpChange = rdISO;
+    }
+    if (typeof clk === "number" && clk !== Number(rec.lastClk || 0)) {
+      rec.lastClk = Number(clk);
+      rec.lastClkChange = rdISO;
+    }
+  }
+  return {
+    lastImpChange: rec.lastImpChange ? new Date(rec.lastImpChange) : null,
+    lastClkChange: rec.lastClkChange ? new Date(rec.lastClkChange) : null
+  };
+}
+
+// ---------------------
+// Owner/Rep mapping helpers + lookup from "Networks" (prefer OPS in P–S)
+// ---------------------
+function normalizeAdv_(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '')
+    .replace(/\[.*?\]/g, '')
+    .replace(/\b(inc|llc|ltd|corp|corporation|group)\b/g, '')
+    .replace(/[^a-z0-9+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveRep_(ownerMap, netId, adv) {
+  const rawKey  = netId + "|||" + String(adv || "").toLowerCase().trim();
+  const normKey = netId + "|||" + normalizeAdv_(adv || "");
+  const rr = ownerMap.byKey[rawKey];
+  const nr = ownerMap.byKey[normKey];
+  return (rr && rr.rep) || (nr && nr.rep) || "Unassigned";
+}
+
+function loadOwnerMapFromNetworks_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName("Networks");
+  const byKey = {};
+
+  if (!sh || sh.getLastRow() < 2) return { byKey: byKey };
+
+  const vals = sh.getDataRange().getValues();
+  const hdr  = vals[0].map(function(h){ return String(h || "").trim().toLowerCase(); });
+
+  const idIdx = (function() {
+    const cands = ["network id","network_id","networkid","cm360 network id"];
+    for (let i = 0; i < cands.length; i++) { const c = cands[i]; const idx = hdr.indexOf(c); if (idx !== -1) return idx; }
+    return -1;
+  })();
+  const advIdx = (function() {
+    const cands = ["advertiser","advertiser name","advertiser_name","cm360 advertiser","cm360 advertiser name"];
+    for (let i = 0; i < cands.length; i++) { const c = cands[i]; const idx = hdr.indexOf(c); if (idx !== -1) return idx; }
+    return -1;
+  })();
+
+  function findOpsInRange_(hdrArr, start, end) {
+    for (let i = start; i <= end && i < hdrArr.length; i++) {
+      const name = hdrArr[i];
+      if (/ops/.test(name)) return i;
+    }
+    return -1;
+  }
+  let repIdx = findOpsInRange_(hdr, 15, 18);
+
+  if (repIdx === -1) {
+    const repCands = [
+      "account rep ops","rep ops","ops owner","ops member","ops",
+      "owner (ops)","operations owner","account owner","owner","rep","sales rep","account lead"
+    ];
+    for (let i = 0; i < repCands.length; i++) {
+      const c = repCands[i];
+      const j = hdr.indexOf(c);
+      if (j !== -1) { repIdx = j; break; }
+    }
+  }
+
+  if (idIdx === -1 || advIdx === -1 || repIdx === -1) return { byKey: byKey };
+
+  for (let r = 1; r < vals.length; r++) {
+    const netId = String(vals[r][idIdx] || "").trim();
+    const adv   = String(vals[r][advIdx] || "").trim();
+    const theRep = String(vals[r][repIdx] || "").trim();
+    if (!netId || !adv) continue;
+
+    const rawKey  = netId + "|||" + adv.toLowerCase();
+    const normKey = netId + "|||" + normalizeAdv_(adv);
+    const payload = { rep: theRep || "Unassigned" };
+
+    byKey[rawKey]  = payload;
+    byKey[normKey] = payload;
+  }
+
+  return { byKey: byKey };
+}
+
+// Export a single Sheet as XLSX blob (robust via export endpoint)
+function createXLSXFromSheet(sheet) {
+  if (!sheet) throw new Error("createXLSXFromSheet: sheet is required");
+
+  const tmp = SpreadsheetApp.create("TMP_EXPORT_" + Date.now());
+  const tmpId = tmp.getId();
+  const tmpSs = SpreadsheetApp.openById(tmpId);
+
+  const copied = sheet.copyTo(tmpSs).setName(sheet.getName());
+  tmpSs.getSheets().forEach(function(s){
+    if (s.getSheetId() !== copied.getSheetId()) tmpSs.deleteSheet(s);
+  });
+  tmpSs.setActiveSheet(copied);
+  tmpSs.moveActiveSheet(0);
+
+  const url = 'https://docs.google.com/spreadsheets/d/' + tmpId + '/export?format=xlsx';
+  const token = ScriptApp.getOAuthToken();
+  const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+
+  DriveApp.getFileById(tmpId).setTrashed(true);
+  return response.getBlob();
+}
+
+function getStaleThresholdDays_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const networksSheet = ss.getSheetByName("Networks");
+  if (!networksSheet) return 7;
+
+  const raw = String(networksSheet.getRange("H1").getDisplayValue() || "").trim();
+  const m = raw.match(/-?\d+(\.\d+)?/);
+  let v = m ? Number(m[0]) : NaN;
+
+  if (!isFinite(v) || v <= 0) v = 7;
+  v = Math.floor(v);
+  Logger.log("Stale threshold days used (from Networks!H1): " + v + " (raw='" + raw + "')");
+  return v;
+}
+
+
+/*******************************************************
+ * Low-Priority Scoring — Lightweight (NO sheets/logging)
+ *******************************************************/
+
+// Keep these defaults (same signal quality, no sheet I/O)
+const X_CH = "[x×✕]";
+const DEFAULT_LP_PATTERNS = [
+  ['Impression Pixel/Beacon', `\\b0\\s*${X_CH}\\s*0\\b|\\bzero\\s*by\\s*zero\\b`, 40, 'Zero-size creative', 'Y'],
+  ['Impression Pixel/Beacon', `\\b1\\s*${X_CH}\\s*1\\b|\\b1\\s*by\\s*1\\b|\\b1x1(?:cc)?\\b`, 30, '1x1 variants', 'Y'],
+  ['Impression Pixel/Beacon', `\\bpixel(?:\\s*only)?\\b|\\bbeacon\\b|\\bclear\\s*pixel\\b|\\btransparent\\s*pixel\\b|\\bspacer\\b|\\bshim\\b`, 20, 'Pixel-ish words', 'Y'],
+
+  ['Click Tracker', `\\bclick\\s*tr(?:ac)?k(?:er)?\\b`, 28, 'click tracker', 'Y'],
+  ['Click Tracker', `\\bclick[_-]?(?:trk|tr)\\b|\\bclk[_-]?trk\\b|\\bclktrk\\b|\\bctrk\\b`, 26, 'click/clk tracker shorthands', 'Y'],
+  ['Click Tracker', `(^|[^A-Za-z0-9])ct(?:_?trk)\\b`, 22, 'bounded CT_TRK', 'Y'],
+  ['Click Tracker', `tracking\\s*1\\s*${X_CH}\\s*1|track(?:ing)?\\s*1x1`, 20, 'tracking 1x1', 'Y'],
+  ['Click Tracker', `dfa\\s*zero\\s*placement|zero\\s*placement`, 18, 'legacy DFA zero placement', 'Y'],
+
+  ['VAST/CTV Tracking Tag', `\\bvid(?:eo)?[\\s_\\-]*tag\\b`, 25, 'VID_TAG / video tag', 'Y'],
+  ['VAST/CTV Tracking Tag', `\\bvid[\\s_\\-]*:(?:06|15|30)s?\\b`, 22, 'VID:06/15/30 shorthand', 'Y'],
+  ['VAST/CTV Tracking Tag', `\\bvast[\\s_\\-]*(?:tag|pixel|tracker)\\b`, 30, 'VAST tag/pixel/tracker', 'Y'],
+  ['VAST/CTV Tracking Tag', `\\bdv[_\\-]?tag\\b|\\bgcm[_\\-]?(?:non[_\\-]?)?tag\\b|\\bgcm[_\\-]?dv[_\\-]?tag\\b`, 30, 'DV_TAG/GCM tags', 'Y'],
+  ['VAST/CTV Tracking Tag', `\\bvpaid\\b|\\bomsdk\\b|\\bavoc\\b`, 18, 'VPAID/OMSDK/AVOC', 'Y'],
+
+  ['Viewability/Verification', `\\bom(id)?\\b|\\bmoat\\b|\\bias\\b|\\bintegral\\s*ad\\s*science\\b|\\bdoubleverify\\b|\\bcomscore\\b|\\bpixalate\\b|\\bverification\\b|\\bviewability\\b`, 18, 'Verification vendors/terms', 'Y'],
+
+  ['Placeholder/Tag-Only/Test', `\\b[_-]?tag\\b|\\bnon[_-]?tag\\b|\\bplaceholder\\b|\\bdefault\\s*tag\\b|\\bqa\\b|\\btest\\b|\\bsample\\b`, 15, 'Non-serving / test-ish', 'Y'],
+
+  ['Impression-Only Keywords', `\\bimp(?:ression)?[\\s_\\-]*only\\b|\\bimpr[\\s_\\-]*only\\b|\\bview[\\s_\\-]*through\\b`, 20, 'Impr-only phrasing', 'Y'],
+
+  ['Social/3P Pixel', `\\b(meta|facebook|tiktok|snap|pinterest|youtube)[\\s_\\-]*(pixel|tag)\\b`, 15, 'Social pixel/tag', 'Y'],
+  ['Social/3P Pixel', `\\bfbq\\b|\\bttq\\b|\\bsnaptr\\b|\\bpintrk\\b|\\btwq\\b|\\bgads\\b`, 15, 'SDK shorthands', 'Y'],
+
+  ['Descriptor Only', `\\b(?:added\\s*value|sponsorship)\\b`, 5, 'Descriptor-only if CPM-only', 'Y'],
+  ['Signal', `\\bN\\/A\\b`, 10, 'N/A token in piped name', 'Y']
+];
+
+// Negatives used only to *reduce* likelihood when both metrics are present
+const DEFAULT_NEG_PATTERNS = [
+  ['DisplaySize', `\\b(120\\s*${X_CH}\\s*600|160\\s*${X_CH}\\s*600|300\\s*${X_CH}\\s*50|300\\s*${X_CH}\\s*100|300\\s*${X_CH}\\s*250|300\\s*${X_CH}\\s*600|320\\s*${X_CH}\\s*50|320\\s*${X_CH}\\s*100|336\\s*${X_CH}\\s*280|468\\s*${X_CH}\\s*60|728\\s*${X_CH}\\s*90|970\\s*${X_CH}\\s*90|970\\s*${X_CH}\\s*250|980\\s*${X_CH}\\s*120|980\\s*${X_CH}\\s*240|640\\s*${X_CH}\\s*360|1280\\s*${X_CH}\\s*720|1920\\s*${X_CH}\\s*1080)\\b`, 35, 'Standard creative sizes', 'Y'],
+  ['AssetExt', `\\b(?:jpg|jpeg|png|gif|mp4|mov|webm)\\b`, 10, 'Creative file type mentioned', 'Y'],
+  ['RealCreativeKeywords', `\\b(?:interstitial|masthead|takeover|homepage|roadblock)\\b`, 15, 'Likely real creatives', 'Y']
+];
+
+// Probability tuning (same math, no logging)
+const LP_THRESHOLDS = { VERY_LIKELY: 85, LIKELY: 70, POSSIBLE: 55 };
+const LP_BASE_SCORE = 40;
+
+let _lpCompiled = null;
+let _negCompiled = null;
+
+function compileLPPatternsIfNeeded_() {
+  if (_lpCompiled && _negCompiled) return;
+
+  _lpCompiled = DEFAULT_LP_PATTERNS.map(function(r){
+    let re = null; try { re = new RegExp(String(r[1]), 'i'); } catch (e) { /* noop */ }
+    return {
+      category: String(r[0]),
+      re: re,
+      weight: Number(r[2] || 0),
+      label: String(r[0]) + ':' + String(r[1]),
+      enabled: String(r[4] || 'Y').toUpperCase().startsWith('Y') && !!re
+    };
+  });
+
+  _negCompiled = DEFAULT_NEG_PATTERNS.map(function(r){
+    let re = null; try { re = new RegExp(String(r[1]), 'i'); } catch (e) { /* noop */ }
+    return {
+      category: r[0],
+      re: re,
+      weight: Number(r[2] || 0),
+      label: String(r[0]) + ':' + String(r[1]),
+      enabled: !!re
+    };
+  });
+}
+
+function normalizeName_(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[×✕]/g, 'x')
+    .replace(/\|/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function clamp_(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+/**
+ * Lightweight classifier:
+ * - NO sheet reads/writes
+ * - Returns descriptor string or '' (no tag)
+ * - gating: 'CPM-only' | 'CPC-only' | 'Mixed'
+ */
+function scoreAndLabelLowPriority_(placementName, clicks, impr, rowIdOrIndex, gating) {
+  gating = gating || ((impr > 0 && clicks === 0) ? 'CPM-only' :
+                      (impr === 0 && clicks > 0) ? 'CPC-only' : 'Mixed');
+
+  compileLPPatternsIfNeeded_();
+
+  if (gating === 'Mixed') {
+    // Don’t LP-tag rows where both metrics present (or pathological both+clicks>impr)
+    return '';
+  }
+
+  const s = normalizeName_(placementName);
+  let pos = 0, neg = 0;
+  const catScores = Object.create(null);
+
+  for (var i=0; i<_lpCompiled.length; i++) {
+    var p = _lpCompiled[i];
+    if (!p.enabled || !p.re) continue;
+    if (p.re.test(s)) {
+      pos += p.weight;
+      catScores[p.category] = (catScores[p.category] || 0) + p.weight;
+    }
+  }
+
+  // If Mixed, we’d subtract negatives; for single-metric add a tiny boost when size present
+  if (gating !== 'Mixed') {
+    var sizeRgx = _negCompiled[0].re;
+    if (sizeRgx && sizeRgx.test(s)) {
+      pos += 15; // helps 1x1 & obvious “pixel-ish” names
+      catScores['Impression Pixel/Beacon'] = (catScores['Impression Pixel/Beacon'] || 0) + 15;
+    }
+  } else {
+    for (var j=0; j<_negCompiled.length; j++) {
+      var n = _negCompiled[j];
+      if (n.enabled && n.re && n.re.test(s)) neg += n.weight;
+    }
+  }
+
+  var has0x0  = /\b0\s*x\s*0\b|\bzero\s*by\s*zero\b/.test(s);
+  var hasTag  = /\bvid(?:eo)?[\s_\-]*tag\b/.test(s) || /\b(?:gcm|dv)[\s_\-]*(?:non[\s_\-]*)?tag\b|\bdv[_\-]?tag\b/.test(s);
+  var hasDur  = /\bvid[\s_\-]*:(?:06|15|30)s?\b/.test(s);
+  if (has0x0 && (hasTag || hasDur)) {
+    pos += 20;
+    catScores['VAST/CTV Tracking Tag'] = (catScores['VAST/CTV Tracking Tag'] || 0) + 20;
+  }
+
+  if (gating === 'CPC-only' && (catScores['Click Tracker'] || 0) > 0) {
+    pos += 10;
+  }
+  if (gating === 'CPM-only' && (catScores['Impression Pixel/Beacon'] || 0) > 0) {
+    pos += 10;
+  }
+
+  var probability = clamp_(LP_BASE_SCORE + pos - neg, 0, 100);
+  var band = (probability >= LP_THRESHOLDS.VERY_LIKELY) ? 'Very likely'
+          : (probability >= LP_THRESHOLDS.LIKELY)      ? 'Likely'
+          : (probability >= LP_THRESHOLDS.POSSIBLE)    ? 'Possible'
+          : 'Unlikely';
+
+  if (band === 'Unlikely') return '';
+
+  var topCat = '';
+  var maxCatScore = -1;
+  for (var cat in catScores) {
+    if (catScores[cat] > maxCatScore) { maxCatScore = catScores[cat]; topCat = cat; }
+  }
+  if (!topCat) topCat = 'Impression Pixel/Beacon';
+
+  // Descriptor only; no writes/logging
+  return 'Low Priority — ' + topCat + ' (' + band + ')';
+}
+
+
+
+
+// ---------------------
+// runQAOnly (auto-resume, chunked, lock-guarded)
+// ---------------------
 function runQAOnly() {
-  Logger.log('⚠️ PLACEHOLDER: runQAOnly - Replace with your complete implementation');
-  // TODO: Add your complete runQAOnly implementation here
+  // Prevent overlapping runs
+  const dlock = LockService.getDocumentLock();
+  if (!dlock.tryLock(5000)) { scheduleNextQAChunk_(2); return; }
+
+  // Clear any stale scheduled id right as we start a chunk
+  cancelQAChunkTrigger_();
+
+  try {
+    const ss  = SpreadsheetApp.getActiveSpreadsheet();
+    const raw = ss.getSheetByName("Raw Data");
+    const out = ss.getSheetByName("Violations");
+    if (!raw || !out) return;
+
+    const data = raw.getDataRange().getValues();
+    if (!data || data.length <= 1) return;
+
+    const headers = data[0];
+    const m = getHeaderMap(headers);
+
+    const ignoreSet = loadIgnoreAdvertisers();
+    const ownerMap  = loadOwnerMapFromNetworks_();
+    const vMap      = loadViolationChangeMap_();
+
+
+
+    compileLPPatternsIfNeeded_();
+
+    let state = getQAState_();
+    const totalRows = data.length - 1; // excluding header
+    const freshStart = !state || state.totalRows !== totalRows;
+
+    if (freshStart) {
+      clearViolations();
+      state = { session: String(Date.now()), next: 2, totalRows: totalRows };
+      saveQAState_(state);
+      cancelQAChunkTrigger_();
+    }
+
+    const startTime = Date.now();
+    const today = new Date();
+    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    // —— Tweak these constants in your file (outside this function) ——
+    // const QA_CHUNK_ROWS = 3500;
+    // const QA_TIME_BUDGET_MS = 4.2 * 60 * 1000;
+
+    let processed = 0;
+    const resultsChunk = [];
+
+    for (let r = state.next; r < data.length; r++) {
+      const row = data[r];
+      const adv  = row[m["Advertiser"]] && String(row[m["Advertiser"]]).trim();
+      const camp = row[m["Campaign"]]   || "";
+
+      const advLower = adv ? adv.toLowerCase() : "";
+      if (advLower && (ignoreSet.has(advLower) || advLower.includes("bidmanager"))) { state.next = r + 1; continue; }
+      if (camp && String(camp).includes("DART Search"))                               { state.next = r + 1; continue; }
+      if (adv === "Grand Total:")                                                     { state.next = r + 1; continue; }
+
+      const imp = Number(row[m["Impressions"]] || 0);
+      const clk = Number(row[m["Clicks"]] || 0);
+      if (imp === 0 && clk === 0) { state.next = r + 1; continue; }
+
+      const ctr = imp > 0 ? (clk / imp) * 100 : 0;
+
+      // Your CPC/CPM formulas
+      const cpc = clk * 0.008;
+      const cpm = (imp / 1000) * 0.034;
+
+      const ps  = new Date(row[m["Placement Start Date"]]);
+      const pe  = new Date(row[m["Placement End Date"]]);
+      const rd  = new Date(row[m["Report Date"]]);
+
+      const daysRem  = Math.ceil((pe - rd) / 86400000);
+      const eom      = new Date(rd.getFullYear(), rd.getMonth() + 1, 0);
+      const daysLeft = Math.ceil((eom - rd) / 86400000);
+
+      const flen = (pe - ps) / 86400000;
+      const din  = (rd - ps) / 86400000;
+      const pctComplete = pe.getTime() === ps.getTime()
+        ? (rd > pe ? 100 : 0)
+        : Math.min(100, Math.max(0, (din / flen) * 100));
+
+      const issueTypes = [];
+      const details    = [];
+      let risk = "";
+
+      // 🟥 BILLING
+      if (pe < firstOfMonth && clk > imp) {
+        issueTypes.push("🟥 BILLING: Expired CPC Risk");
+        details.push("Ended " + pe.toDateString() + " with clicks (" + clk + ") > impressions (" + imp + ")");
+        risk = "🚨 Expired Risk";
+      } else if (pe < rd && clk > imp) {
+        issueTypes.push("🟥 BILLING: Recently Expired CPC Risk");
+        details.push("Ended " + pe.toDateString() + " and still has clicks > impressions");
+        risk = "⚠️ Expired This Month";
+      } else if (rd <= pe && clk > imp && cpc > 10) {
+        issueTypes.push("🟥 BILLING: Active CPC Billing Risk");
+        details.push("Active: clicks (" + clk + ") > impressions (" + imp + "), $CPC = $" + cpc.toFixed(2));
+        risk = "⚠️ Active CPC Risk";
+      }
+
+      // 🟦 DELIVERY
+      if (pe < firstOfMonth && rd >= firstOfMonth && (imp > 0 || clk > 0)) {
+        issueTypes.push("🟦 DELIVERY: Post-Flight Activity");
+        details.push("Ended " + pe.toDateString() + " but has " + imp + " impressions and " + clk + " clicks");
+      }
+
+      // 🟨 PERFORMANCE
+      if (ctr >= 90 && cpm >= 10) {
+        issueTypes.push("🟨 PERFORMANCE: CTR ≥ 90% & CPM ≥ $10");
+        details.push("CTR = " + ctr.toFixed(2) + "%, $CPM = $" + cpm.toFixed(2));
+      }
+
+      // 🟩 COST
+      let isCPMOnly = false;
+      let isCPCOnly = false;
+      if (cpc > 0 && cpm === 0 && cpc > 10) {
+        issueTypes.push("🟩 COST: CPC Only > $10");
+        details.push("No CPM spend, $CPC = $" + cpc.toFixed(2));
+        if (imp === 0 && clk > 0) isCPCOnly = true;
+      }
+      if (cpm > 0 && cpc === 0 && cpm > 10) {
+        issueTypes.push("🟩 COST: CPM Only > $10");
+        details.push("No CPC spend, $CPM = $" + cpm.toFixed(2));
+        if (imp > 0 && clk === 0) isCPMOnly = true;
+      }
+      if (cpc > 0 && cpm > 0 && clk > imp && cpc > 10) {
+        issueTypes.push("🟩 COST: CPC+CPM Clicks > Impr & CPC > $10");
+        details.push("Clicks > impressions with both CPC and CPM charges (CPC = $" + cpc.toFixed(2) + ")");
+      }
+
+      // --- Low-priority tagging via scorer (gating-aware) — no sheet writes ---
+      const bothMetricsPresent = imp > 0 && clk > 0;
+      const clicksExceedImprWithBoth = bothMetricsPresent && (clk > imp);
+      const gating = (imp > 0 && clk === 0) ? 'CPM-only' :
+                     (imp === 0 && clk > 0) ? 'CPC-only' : 'Mixed';
+
+      if (!bothMetricsPresent && !clicksExceedImprWithBoth) {
+        const placement = row[m["Placement"]];
+        const rowIdOrIndex = String(row[m["Placement ID"]] || (r + 1));
+        const lpDescriptor = scoreAndLabelLowPriority_(placement, clk, imp, rowIdOrIndex, gating);
+        if (lpDescriptor) {
+          issueTypes.push("🟩 COST: (Low Priority) " + lpDescriptor.replace(/^Low Priority —\s*/, ""));
+        }
+      }
+      // --- end Low-priority tagging ---
+
+      if (!issueTypes.length) { state.next = r + 1; continue; }
+
+      const pid = String(row[m["Placement ID"]] || "");
+      const key = pid ? ("pid:" + pid) : ("k:" + row[m["Network ID"]] + "|" + camp + "|" + row[m["Placement"]]);
+      const changes = upsertViolationChange_(vMap, key, rd, imp, clk, pe);
+
+      function daysSince_(lastChangeDate, reportDate) {
+        if (!(lastChangeDate instanceof Date) || isNaN(lastChangeDate) || !(reportDate instanceof Date) || isNaN(reportDate)) return "";
+        const ms = reportDate.getTime() - lastChangeDate.getTime();
+        if (ms < 0) return "";
+        return Math.floor(ms / 86400000);
+      }
+      const lastImpDays = changes.lastImpChange ? daysSince_(changes.lastImpChange, rd) : "";
+      const lastClkDays = changes.lastClkChange ? daysSince_(changes.lastClkChange, rd) : "";
+
+      const ownerOps = resolveRep_(ownerMap, String(row[m["Network ID"]] || ""), adv) || "Unassigned";
+
+      resultsChunk.push([
+        row[m["Network ID"]], row[m["Report Date"]], row[m["Advertiser"]], row[m["Campaign"]],
+        row[m["Campaign Start Date"]], row[m["Campaign End Date"]], row[m["Ad"]], row[m["Placement ID"]],
+        row[m["Placement"]], row[m["Placement Start Date"]], row[m["Placement End Date"]],
+        imp, clk, ctr.toFixed(2) + "%", daysRem, pctComplete.toFixed(1) + "%", daysLeft,
+        risk, "$" + cpc.toFixed(2), "$" + cpm.toFixed(2), issueTypes.join(", "), details.join(" | "),
+        lastImpDays, lastClkDays, ownerOps
+      ]);
+
+      processed++;
+      state.next = r + 1;
+
+      // Respect chunk size & time budget
+      if (processed >= QA_CHUNK_ROWS) break;
+      if ((Date.now() - startTime) >= QA_TIME_BUDGET_MS) break;
+    }
+
+    // Persist violation-change snapshot
+    cleanupViolationCache_(vMap, today);
+    saveViolationChangeMap_(vMap);
+
+    // Write this chunk's rows
+    if (resultsChunk.length) {
+      const width = resultsChunk[0].length;
+      const startWriteRow = out.getLastRow() + 1;
+      out.getRange(startWriteRow, 1, resultsChunk.length, width).setValues(resultsChunk);
+    }
+
+    // Decide: finished or schedule next chunk
+    if (state.next >= (data.length)) {
+      clearQAState_();
+      cancelQAChunkTrigger_();
+      Logger.log("✅ runQAOnly complete. Processed all " + totalRows + " data rows.");
+    } else {
+      saveQAState_(state);
+      Logger.log("⏳ runQAOnly partial: processed " + processed + " rows this run. Next row index: "
+        + state.next + " / " + (data.length - 1));
+      scheduleNextQAChunk_(2); // resume soon
+    }
+  } finally {
+    dlock.releaseLock();
+  }
 }
 
+
+
+
+// === Helpers for "Immediate Attention" selection ===
+function _parseMoney_(s) { // "$12.34" -> 12.34
+  var n = String(s || "").replace(/[^\d.-]/g, "");
+  var v = parseFloat(n);
+  return isFinite(v) ? v : 0;
+}
+function _parsePct_(s) { // "95.00%" -> 95
+  var n = String(s || "").replace(/[^\d.-]/g, "");
+  var v = parseFloat(n);
+  return isFinite(v) ? v : 0;
+}
+
+
+
+
+
+
+// ---------------------
+// sendEmailSummary (size-safe) — UPDATED with extra buckets
+// ---------------------
 function sendEmailSummary() {
-  Logger.log('⚠️ PLACEHOLDER: sendEmailSummary - Replace with your complete implementation');
-  // TODO: Add your complete sendEmailSummary implementation here
+  // Skip if QA is still running in chunks
+  const _qaState = getQAState_();
+  if (_qaState && _qaState.session) {
+    Logger.log("sendEmailSummary skipped: QA still in progress (chunked).");
+    return;
+  }
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const today = new Date();
+
+  // Only send on/after the 15th
+  if (today.getDate() < 15) {
+    Logger.log("Email summary skipped: before the 15th of the month.");
+    return;
+  }
+
+  // --- Email size & filtering controls ---
+  const INCLUDE_APPENDIX = false;
+  const INCLUDE_ZERO_NETS = false;
+  const MAX_ROWS_PER_OWNER = 30;
+  const MAX_TOTAL_OWNER_ROWS = 1000;
+  const MAX_HTML_CHARS = 90000;
+
+  // Sheets
+  const sheet           = ss.getSheetByName("Violations");
+  const rawSheet        = ss.getSheetByName("Raw Data");
+  const networksSheet   = ss.getSheetByName("Networks");
+  const recipientsSheet = ss.getSheetByName("EMAIL LIST");
+  if (!sheet || !rawSheet || !recipientsSheet) return;
+
+  // Recipients
+  const emails = recipientsSheet.getRange("A2:A").getValues()
+    .flat().map(function(e){ return String(e || "").trim(); }).filter(Boolean);
+  const uniqueEmails = Array.from(new Set(emails));
+  if (uniqueEmails.length === 0) return;
+
+  // Data
+  const violations = sheet.getDataRange().getValues();
+  const rawData    = rawSheet.getDataRange().getValues();
+  if (violations.length <= 1) return;
+
+  const hMap = getHeaderMap(violations[0]);
+  const rMap = getHeaderMap(rawData[0]);
+
+  // --- Network ID -> Network Name ---
+  function buildNetworkNameMap_() {
+    if (!networksSheet) return {};
+    const vals = networksSheet.getDataRange().getValues();
+    const map = {};
+    for (let r = 1; r < vals.length; r++) {
+      const idRaw = vals[r][0];
+      const name  = String(vals[r][1] == null ? "" : vals[r][1]).replace(/\u00A0/g, " ").trim();
+      if (!idRaw) continue;
+      let id = "";
+      if (typeof idRaw === "number") id = String(Math.trunc(idRaw));
+      else {
+        let s = String(idRaw).replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
+        s = s.replace(/,/g, "");
+        const digits = s.replace(/\D+/g, "");
+        id = digits || s;
+      }
+      if (id) map[id] = name;
+    }
+    return map;
+  }
+  const networkNameMap = buildNetworkNameMap_();
+
+  // --- Counts per network ---
+  const placementCounts = {};
+  rawData.slice(1).forEach(function(r){
+    const id = String(r[rMap["Network ID"]] || "");
+    if (id) placementCounts[id] = (placementCounts[id] || 0) + 1;
+  });
+
+  // --- Violation counts per network (by group) ---
+  const violationCounts = {};
+  violations.slice(1).forEach(function(r){
+    const id    = String(r[hMap["Network ID"]] || "");
+    const types = String(r[hMap["Issue Type"]] || "").split(", ");
+    if (!violationCounts[id]) {
+      violationCounts[id] = { "🟥 BILLING": 0, "🟦 DELIVERY": 0, "🟨 PERFORMANCE": 0, "🟩 COST": 0 };
+    }
+    types.forEach(function(t){
+      if (t.startsWith("🟥")) violationCounts[id]["🟥 BILLING"]++;
+      if (t.startsWith("🟦")) violationCounts[id]["🟦 DELIVERY"]++;
+      if (t.startsWith("🟨")) violationCounts[id]["🟨 PERFORMANCE"]++;
+      if (t.startsWith("🟩")) violationCounts[id]["🟩 COST"]++;
+    });
+  });
+
+  // --- Network summary table ---
+  let networkSummary =
+      '<p><b>Network-Level QA Summary</b></p>'
+    + '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse: collapse; font-size: 11px;">'
+    + '<tr style="background-color: #f2f2f2; font-weight: bold;">'
+    + '<th>Network ID</th><th>Network Name</th><th>Placements Checked</th>'
+    + '<th>🟥 BILLING</th><th>🟦 DELIVERY</th><th>🟨 PERFORMANCE</th><th>🟩 COST</th>'
+    + '</tr>';
+
+  Object.entries(networkNameMap)
+    .filter(function(pair){
+      const id = pair[0];
+      if (INCLUDE_ZERO_NETS) return true;
+      const vc = violationCounts[id] || { "🟥 BILLING":0,"🟦 DELIVERY":0,"🟨 PERFORMANCE":0,"🟩 COST":0 };
+      const total = vc["🟥 BILLING"] + vc["🟦 DELIVERY"] + vc["🟨 PERFORMANCE"] + vc["🟩 COST"];
+      return total > 0;
+    })
+    .sort(function(a, b){ return a[1].localeCompare(b[1]); })
+    .forEach(function(entry){
+      const id = entry[0], name = entry[1];
+      const pc = placementCounts[id] || 0;
+      const vc = violationCounts[id] || { "🟥 BILLING":0,"🟦 DELIVERY":0,"🟨 PERFORMANCE":0,"🟩 COST":0 };
+      networkSummary += '<tr>'
+        + '<td>' + id + '</td><td>' + name + '</td><td>' + pc + '</td>'
+        + '<td>' + vc["🟥 BILLING"] + '</td><td>' + vc["🟦 DELIVERY"] + '</td><td>' + vc["🟨 PERFORMANCE"] + '</td><td>' + vc["🟩 COST"] + '</td>'
+        + '</tr>';
+    });
+  networkSummary += '</table><br/>';
+
+  // --- Grouped issue summary (unchanged) ---
+  const groupedCounts = { "🟥 BILLING": {}, "🟦 DELIVERY": {}, "🟨 PERFORMANCE": {}, "🟩 COST": {} };
+  violations.slice(1).forEach(function(r){
+    const types = String(r[hMap["Issue Type"]] || "").split(", ");
+    types.forEach(function(t){
+      const match = t.match(/^(🟥|🟦|🟨|🟩)\s(\w+):\s(.+)/);
+      if (match) {
+        const emoji = match[1], group = match[2], subtype = match[3];
+        const key = emoji + " " + group;
+        groupedCounts[key] = groupedCounts[key] || {};
+        groupedCounts[key][subtype] = (groupedCounts[key][subtype] || 0) + 1;
+      }
+    });
+  });
+  let summaryHtml = "";
+  Object.entries(groupedCounts).forEach(function(entry){
+    const groupLabel = entry[0], subtypes = entry[1];
+    summaryHtml += "<b>" + groupLabel + "</b><ul>";
+    Object.entries(subtypes).forEach(function(st){
+      const subtype = st[0], count = st[1];
+      if (count > 0) summaryHtml += "<li>" + subtype + ": " + count + "</li>";
+    });
+    summaryHtml += "</ul>";
+  });
+
+  // --- Immediate Attention — Key Issues (by Owner) — UPDATED bucket logic
+  function buildImmediateAttentionByOwner_() {
+    const ownerMap = loadOwnerMapFromNetworks_();
+  const perOwner = {};
+
+  // Column indexes
+  const idx = {
+    netId: hMap["Network ID"],
+    adv:   hMap["Advertiser"],
+    camp:  hMap["Campaign"],
+    pid:   hMap["Placement ID"],
+    plc:   hMap["Placement"],
+    impr:  hMap["Impressions"],
+    clk:   hMap["Clicks"],
+    ctr:   hMap["CTR (%)"],
+    cpc$:  hMap["$CPC"],
+    cpm$:  hMap["$CPM"],
+    issues:hMap["Issue Type"],
+    rd:    hMap["Report Date"],
+    pe:    hMap["Placement End Date"]
+  };
+
+  // bucket order (lower = higher priority in sort)
+  const BUCKETS = {
+    PERF: 1,               // 🟨 Performance
+    COST_BIMBAL: 2,        // 🟩 CPC+CPM clicks>impr & $CPC>10
+    BILLING: 3,            // 🟥 (Active/Recently Expired/Expired) + tightened rules
+    DELIV_STRICT: 4,       // 🟦 Post-flight + clicks>impr + $CPC>10
+    DELIV_CPM_ONLY: 5,     // 🟦 Post-flight + CPM-only >$10
+    DELIV_GENERAL: 6       // 🟦 Post-flight (any activity) but only if $CPC>10 || $CPM>10
+  };
+
+  const today = new Date();
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  function qualifies_(row) {
+    const issues = String(row[idx.issues] || "");
+    // exclude Low Priority rows entirely
+    if (/\(Low Priority\)/i.test(issues)) return null;
+
+    const imp = Number(row[idx.impr] || 0);
+    const clk = Number(row[idx.clk] || 0);
+    const both = imp > 0 && clk > 0;
+    const clicksGtImpr = both && (clk > imp);
+
+    const cpc = _parseMoney_(row[idx.cpc$]);
+    const cpm = _parseMoney_(row[idx.cpm$]);
+    const ctrPct = _parsePct_(row[idx.ctr]);
+
+    const rd = new Date(row[idx.rd]);
+    const pe = new Date(row[idx.pe]);
+    const isPostFlight = pe < firstOfMonth && rd >= firstOfMonth;
+
+    // === Your inclusion rules ===
+
+    // 🟨 PERFORMANCE: CTR ≥ 90% & CPM ≥ $10
+    const isPerformance = /🟨\s*PERFORMANCE: CTR ≥ 90% & CPM ≥ \$?10/.test(issues) ||
+                          (ctrPct >= 90 && cpm >= 10);
+
+    // 🟩 CPC+CPM Clicks > Impr & CPC > $10  (both metrics, clicks>impr & CPC>10)
+    const isCostBothMetricsClicksGtImpr = /🟩\s*COST: CPC\+CPM Clicks > Impr.*CPC > \$?10/i.test(issues) ||
+                                          (both && clicksGtImpr && cpc > 10);
+
+    // 🟥 BILLING (tightened to both metrics, clicks>impr & $CPC>10)
+    const isBillingActive   = /🟥\s*BILLING: Active CPC Billing Risk/i.test(issues)   && both && clicksGtImpr && cpc > 10;
+    const isBillingRecent   = /🟥\s*BILLING: Recently Expired CPC Risk/i.test(issues) && both && clicksGtImpr && cpc > 10;
+    const isBillingExpired  = /🟥\s*BILLING: Expired CPC Risk/i.test(issues)          && both && clicksGtImpr && cpc > 10;
+
+    // 🟦 DELIVERY (Post-Flight) inclusions you selected
+    // 1) Strict: post-flight + both metrics + clicks>impr + $CPC>10
+    const isDelivStrict = /🟦\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && both && clicksGtImpr && cpc > 10;
+    // 2) CPM-only > $10 (post-flight)
+    const isDelivCpmOnly = /🟦\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && (imp > 0 && clk === 0) && cpm > 10;
+    // 3) General: post-flight, include only if $CPC>10 OR $CPM>10
+    const isDelivGeneral = /🟦\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && (cpc > 10 || cpm > 10);
+
+    // ❌ Explicit excludes
+    const isCpcOnly = /🟩\s*COST:\s*CPC\s*Only\s*>\s*\$?10/i.test(issues) || (imp === 0 && clk > 0 && cpc > 10);
+    const isCpmOnly = /🟩\s*COST:\s*CPM\s*Only\s*>\s*\$?10/i.test(issues) || (imp > 0 && clk === 0 && cpm > 10);
+    if (isCpcOnly || isCpmOnly) return null;
+
+    // decide bucket (highest priority match wins)
+    if (isPerformance)                    return { bucket: BUCKETS.PERF };
+    if (isCostBothMetricsClicksGtImpr)    return { bucket: BUCKETS.COST_BIMBAL };
+    if (isBillingActive || isBillingRecent || isBillingExpired)
+                                           return { bucket: BUCKETS.BILLING };
+    if (isDelivStrict)                    return { bucket: BUCKETS.DELIV_STRICT };
+    if (isDelivCpmOnly)                   return { bucket: BUCKETS.DELIV_CPM_ONLY };
+    if (isDelivGeneral)                   return { bucket: BUCKETS.DELIV_GENERAL };
+
+    return null; // not included
+  }
+
+  // collect rows per owner
+  for (let i = 1; i < violations.length; i++) {
+    const row = violations[i];
+    const q = qualifies_(row);
+    if (!q) continue;
+
+    const netId = String(row[idx.netId] || "").trim();
+    const adv   = String(row[idx.adv]   || "").trim();
+    const rep   = resolveRep_(ownerMap, netId, adv);
+
+    if (!perOwner[rep]) perOwner[rep] = [];
+    perOwner[rep].push({
+      bucket: q.bucket,
+      adv: adv,
+      camp: String(row[idx.camp] || ""),
+      pid:  String(row[idx.pid]  || ""),
+      plc:  String(row[idx.plc]  || ""),
+      imp:  Number(row[idx.impr] || 0),
+      clk:  Number(row[idx.clk]  || 0),
+      issue:String(row[idx.issues] || "")
+    });
+  }
+
+  const owners = Object.keys(perOwner).sort((a,b)=> a.toLowerCase().localeCompare(b.toLowerCase()));
+  if (!owners.length) return "";
+
+  let html = "<p><b>Immediate Attention — Key Issues (by Owner)</b></p>";
+  let totalRows = 0;
+
+  for (const rep of owners) {
+    if (totalRows >= MAX_TOTAL_OWNER_ROWS) break;
+    const arr = perOwner[rep];
+
+    // sort: bucket → advertiser A–Z → clicks desc → impressions desc → placement id
+    arr.sort(function(a, b){
+      if (a.bucket !== b.bucket) return a.bucket - b.bucket;
+      const aAdv = String(a.adv||"").toLowerCase(), bAdv = String(b.adv||"").toLowerCase();
+      if (aAdv !== bAdv) return aAdv.localeCompare(bAdv);
+      if (b.clk !== a.clk) return b.clk - a.clk;
+      if (b.imp !== a.imp) return b.imp - a.imp;
+      return a.pid.localeCompare(b.pid);
+    });
+
+    const take = Math.min(arr.length, MAX_ROWS_PER_OWNER, MAX_TOTAL_OWNER_ROWS - totalRows);
+    if (take <= 0) break;
+    totalRows += take;
+
+    html += "<p><b>" + rep + "</b> (Showing " + take + " of " + arr.length + ")</p>";
+    html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse: collapse; font-size: 11px;">'
+         +  '<tr style="background-color:#f9f9f9;font-weight:bold;">'
+         +  '<th>Advertiser</th><th>Campaign</th><th>Placement ID</th><th>Placement</th><th>Impr</th><th>Clicks</th><th>Issue(s)</th>'
+         +  '</tr>';
+
+    for (let i = 0; i < take; i++) {
+      const o = arr[i];
+      const campShort = o.camp.length > 40 ? o.camp.substring(0, 40) + "…" : o.camp;
+      const plcShort  = o.plc.length  > 30 ? o.plc.substring(0, 30)  + "…" : o.plc;
+      html += "<tr>"
+           +  "<td>" + o.adv + "</td>"
+           +  "<td>" + campShort + "</td>"
+           +  "<td>" + o.pid + "</td>"
+           +  "<td>" + plcShort + "</td>"
+           +  "<td>" + o.imp + "</td>"
+           +  "<td>" + o.clk + "</td>"
+           +  "<td>" + o.issue + "</td>"
+           +  "</tr>";
+    }
+    html += "</table><br/>";
+  }
+
+  return html;
 }
 
+const immediateAttentionHtml = buildImmediateAttentionByOwner_(); // still inside sendEmailSummary()
+
+
+  // --- Stale metrics (unchanged) ---
+  const thresholdDays = getStaleThresholdDays_();
+  let staleImp = 0, staleClk = 0;
+  const impIdx = hMap["Last Imp Change"], clkIdx = hMap["Last Click Change"];
+  if (impIdx !== undefined || clkIdx !== undefined) {
+    for (let i = 1; i < violations.length; i++) {
+      const r = violations[i];
+      const impDays = impIdx !== undefined ? Number(r[impIdx]) : NaN;
+      const clkDays = clkIdx !== undefined ? Number(r[clkIdx]) : NaN;
+      if (isFinite(impDays) && impDays >= thresholdDays) staleImp++;
+      if (isFinite(clkDays) && clkDays >= thresholdDays) staleClk++;
+    }
+  }
+  const staleHtml =
+      "<b>Stale Metrics (this month)</b><ul>"
+    + "<li>Placements with no new impressions since last change (≥ " + thresholdDays + " days): " + staleImp + "</li>"
+    + "<li>Placements with no new clicks since last change (≥ " + thresholdDays + " days): " + staleClk + "</li>"
+    + "</ul>";
+
+  // Appendix (optional)
+  const violationsAppendixHtml =
+      '<p><b>What the Violations tab tracks</b></p>'
+    + '<ul>'
+    + '<li><b>🟥 BILLING</b><ul>'
+    + '<li><b>Expired CPC Risk</b> — Ended before this month and clicks &gt; impressions.</li>'
+    + '<li><b>Recently Expired CPC Risk</b> — Ended earlier this month and still clicks &gt; impressions.</li>'
+    + '<li><b>Active CPC Billing Risk</b> — Active (report date ≤ end date), clicks &gt; impressions, and $CPC &gt; $10.</li>'
+    + '</ul></li>'
+    + '<li><b>🟦 DELIVERY</b><ul>'
+    + '<li><b>Post-Flight Activity</b> — Ended before this month but shows impressions or clicks this month.</li>'
+    + '</ul></li>'
+    + '<li><b>🟨 PERFORMANCE</b><ul>'
+    + '<li><b>CTR ≥ 90% &amp; CPM ≥ $10</b> — Extreme CTR with meaningful CPM spend.</li>'
+    + '</ul></li>'
+    + '<li><b>🟩 COST</b><ul>'
+    + '<li><b>CPC Only &gt; $10</b> — No CPM spend and $CPC &gt; $10.</li>'
+    + '<li><b>CPM Only &gt; $10</b> — No CPC spend and $CPM &gt; $10.</li>'
+    + '<li><b>CPC+CPM Clicks &gt; Impr &amp; CPC &gt; $10</b> — Both CPC &amp; CPM, clicks &gt; impressions, and $CPC &gt; $10.</li>'
+    + '<li><i>(Low Priority tags exist in attachment but are excluded from this section)</i></li>'
+    + '</ul></li>'
+    + '</ul>';
+
+  // Attachment
+  const todayformatted = Utilities.formatDate(today, Session.getScriptTimeZone(), "M.d.yy");
+  const fileName = "CM360_QA_Violations_" + todayformatted + ".xlsx";
+  const xlsxBlob = createXLSXFromSheet(sheet).setName(fileName);
+
+  // Assemble body
+  const subject = "CM360 CPC/CPM FLIGHT QA – " + todayformatted;
+  let htmlBody =
+      networkSummary
+    + '<p>The below is a table of the following Billing, Delivery, Performance and Cost issues:</p>'
+    + summaryHtml
+    + (immediateAttentionHtml ? ('<br/>' + immediateAttentionHtml) : '')
+    + '<br/>' + staleHtml
+    + (INCLUDE_APPENDIX ? ('<br/>' + violationsAppendixHtml) : '')
+    + '<p><i>Brought to you by the Platform Solutions Automation. (Made by: BK)</i></p>';
+
+  // Safety trim if needed
+  if (htmlBody.length > MAX_HTML_CHARS) {
+    htmlBody = htmlBody.slice(0, MAX_HTML_CHARS - 1200)
+             + '<p><i>(trimmed for size — full detail in the attached XLSX)</i></p>';
+  }
+
+  // Send
+  uniqueEmails.forEach(function(addr){
+    try {
+      MailApp.sendEmail({ to: addr, subject: subject, htmlBody: htmlBody, attachments: [xlsxBlob] });
+      Utilities.sleep(300);
+    } catch (err) {
+      Logger.log("Failed to email " + addr + ": " + err);
+    }
+  });
+}
+
+
+
+function fmtMs_(ms) {
+  if (ms < 0) ms = 0;
+  var s = Math.floor(ms / 1000);
+  var m = Math.floor(s / 60);
+  var r = s % 60;
+  return (m + 'm ' + r + 's');
+}
+
+function logStep_(label, fn, runStartMs, quotaMinutes) {
+  var stepStart = Date.now();
+  Logger.log('▶ ' + label + ' — START @ ' + new Date(stepStart).toISOString());
+  try {
+    var out = fn();
+    SpreadsheetApp.flush();
+    var stepMs = Date.now() - stepStart;
+    var totalMs = Date.now() - runStartMs;
+    var quotaMs = (quotaMinutes || 6) * 60 * 1000;
+    var leftMs = quotaMs - totalMs;
+
+    Logger.log('✅ ' + label + ' — DONE in ' + fmtMs_(stepMs)
+      + ' (since run start: ' + fmtMs_(totalMs)
+      + ', est. time left: ' + fmtMs_(leftMs) + ')');
+
+    if (leftMs <= 60000) {
+      Logger.log('⏳ WARNING: ~' + Math.max(0, Math.floor(leftMs/1000)) + 's left in Apps Script quota window.');
+    }
+    return out;
+  } catch (e) {
+    Logger.log('❌ ' + label + ' — ERROR: ' + (e && e.stack ? e.stack : e));
+    throw e;
+  }
+}
+
+// ---------------------
+// runItAll (with execution logging per step)
+// ---------------------
+function runItAll() {
+  var APPROX_QUOTA_MINUTES = 6; // leave at 6 unless your domain truly has more
+  var runStart = Date.now();
+  Logger.log('🚀 runItAll — START @ ' + new Date(runStart).toISOString()
+             + ' (approx quota: ' + APPROX_QUOTA_MINUTES + ' min)');
+
+  try {
+    // 1) Prep & ingest
+    logStep_('trimAllSheetsToData_', function(){ trimAllSheetsToData_(); }, runStart, APPROX_QUOTA_MINUTES);
+    logStep_('importDCMReports',     function(){ importDCMReports();      }, runStart, APPROX_QUOTA_MINUTES);
+
+    // 2) If low on time, schedule QA and exit (handoff)
+    var totalMs  = Date.now() - runStart;
+    var quotaMs  = APPROX_QUOTA_MINUTES * 60 * 1000;
+    var timeLeft = Math.max(0, quotaMs - totalMs);
+
+    if (timeLeft < 2 * 60 * 1000) {
+      Logger.log('⏭ Not enough time left for QA (' + Math.floor(timeLeft/1000) + 's). Scheduling QA handoff.');
+      clearQAState_();           // ensure a fresh QA session
+      cancelQAChunkTrigger_();   // clear any stale chunk trigger
+      scheduleNextQAChunk_(1);   // kick off the first QA chunk shortly
+      return;                    // exit cleanly to avoid hitting the 6-min wall
+    }
+
+    // 3) Otherwise, run at most one QA chunk now
+    logStep_('runQAOnly (single chunk)', function(){ runQAOnly(); }, runStart, APPROX_QUOTA_MINUTES);
+
+    // 4) Alerts & summary (summary already guards on QA completion & date)
+    logStep_('sendPerformanceSpikeAlertIfPre15', function(){ sendPerformanceSpikeAlertIfPre15(); }, runStart, APPROX_QUOTA_MINUTES);
+    logStep_('sendEmailSummary',                 function(){ sendEmailSummary();                 }, runStart, APPROX_QUOTA_MINUTES);
+  } finally {
+    var totalMs = Date.now() - runStart;
+    Logger.log('🏁 runItAll — FINISHED in ' + fmtMs_(totalMs));
+  }
+}
+
+
+// ---------------------
+// arrayToCsv (utility)
+// ---------------------
+function arrayToCsv(data) {
+  return data.map(function(row){ return row.map(function(cell){ return '"' + cell + '"'; }).join(","); }).join("\n");
+}
+
+// ---------------------
+// Trim all sheets' grids (reclaim cells)
+// ---------------------
 function trimAllSheetsToData_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.getSheets().forEach(function(sh){
@@ -631,3 +1642,157 @@ function trimAllSheetsToData_() {
     }
   });
 }
+
+
+// ====== CASCADING TRIGGER SYSTEM ======
+
+const CASCADE_STATE_KEY = 'cascade_progress_v1';
+const CASCADE_TRIGGER_PREFIX = 'cascade_';
+
+// --- CASCADE TRIGGER MANAGEMENT ---
+function clearAllCascadeTriggers_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(trigger) {
+    const funcName = trigger.getHandlerFunction();
+    if (funcName.startsWith('run') && (funcName.includes('Ingestion') || funcName.includes('QAProcessing') || funcName.includes('EmailReporting'))) {
+      ScriptApp.deleteTrigger(trigger);
+      Logger.log('🗑️ Removed trigger: ' + funcName);
+    }
+  });
+}
+
+function scheduleCascadeTrigger_(functionName, delayMinutes) {
+  // Clear any existing trigger for this function
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === functionName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  
+  // Create new trigger
+  const newTrigger = ScriptApp.newTrigger(functionName)
+    .timeBased()
+    .after(delayMinutes * 60 * 1000)
+    .create();
+    
+  Logger.log('⏰ Scheduled ' + functionName + ' in ' + delayMinutes + ' minutes');
+  return newTrigger.getUniqueId();
+}
+
+function setCascadeState_(step, status, data) {
+  const state = {
+    currentStep: step,
+    status: status,
+    timestamp: new Date().toISOString(),
+    data: data || {}
+  };
+  PropertiesService.getDocumentProperties().setProperty(CASCADE_STATE_KEY, JSON.stringify(state));
+}
+
+function getCascadeState_() {
+  const raw = PropertiesService.getDocumentProperties().getProperty(CASCADE_STATE_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+// --- CASCADE STEP 1: DATA INGESTION ---
+function runDataIngestion() {
+  try {
+    setCascadeState_('ingestion', 'started');
+    Logger.log('🚀 CASCADE STEP 1: Data Ingestion - START');
+    
+    // Trim sheets and import data
+    trimAllSheetsToData_();
+    importDCMReports();
+    
+    setCascadeState_('ingestion', 'completed');
+    Logger.log('✅ CASCADE STEP 1: Data Ingestion - COMPLETED');
+    
+    // Schedule next step
+    scheduleCascadeTrigger_('runQAProcessing', 15); // 15 minutes later
+    
+  } catch (error) {
+    setCascadeState_('ingestion', 'failed', { error: error.toString() });
+    Logger.log('❌ CASCADE STEP 1: Data Ingestion - FAILED: ' + error.toString());
+    
+    // Still proceed to QA step in case of partial success
+    scheduleCascadeTrigger_('runQAProcessing', 20); // 20 minutes later with extra buffer
+  }
+}
+
+// --- CASCADE STEP 2: QA PROCESSING ---
+function runQAProcessing() {
+  try {
+    setCascadeState_('qa', 'started');
+    Logger.log('🚀 CASCADE STEP 2: QA Processing - START');
+    
+    // Run QA (this will handle chunking automatically)
+    runQAOnly();
+    
+    // Send performance alerts if pre-15th
+    sendPerformanceSpikeAlertIfPre15();
+    
+    // Check if QA is truly complete
+    const qaState = getQAState_();
+    if (qaState && qaState.session) {
+      // QA is still running in chunks, let it complete first
+      Logger.log('⏳ CASCADE STEP 2: QA still chunking, will wait for completion');
+      setCascadeState_('qa', 'chunking');
+      // Don't schedule email yet - QA chunking will handle final step
+      return;
+    }
+    
+    setCascadeState_('qa', 'completed');
+    Logger.log('✅ CASCADE STEP 2: QA Processing - COMPLETED');
+    
+    // Schedule final step
+    scheduleCascadeTrigger_('runEmailReporting', 15); // 15 minutes later
+    
+  } catch (error) {
+    setCascadeState_('qa', 'failed', { error: error.toString() });
+    Logger.log('❌ CASCADE STEP 2: QA Processing - FAILED: ' + error.toString());
+    
+    // Still proceed to email step for any available data
+    scheduleCascadeTrigger_('runEmailReporting', 20);
+  }
+}
+
+// --- CASCADE STEP 3: EMAIL REPORTING ---
+function runEmailReporting() {
+  try {
+    setCascadeState_('email', 'started');
+    Logger.log('🚀 CASCADE STEP 3: Email Reporting - START');
+    
+    // Send email summary (has built-in >15th filter)
+    sendEmailSummary();
+    
+    setCascadeState_('email', 'completed');
+    Logger.log('✅ CASCADE STEP 3: Email Reporting - COMPLETED');
+    Logger.log('🏁 CASCADE COMPLETE: All steps finished');
+    
+    // Clear cascade state
+    PropertiesService.getDocumentProperties().deleteProperty(CASCADE_STATE_KEY);
+    
+  } catch (error) {
+    setCascadeState_('email', 'failed', { error: error.toString() });
+    Logger.log('❌ CASCADE STEP 3: Email Reporting - FAILED: ' + error.toString());
+  }
+}
+
+// Enhanced QA chunk runner that integrates with cascade
+function runQAChunkAndCheckComplete() {
+  runQAOnly(); // Run the QA chunk
+  
+  // Check if QA is complete
+  const qaState = getQAState_();
+  if (!qaState || !qaState.session) {
+    // QA is complete, check if we're in a cascade
+    const cascadeState = getCascadeState_();
+    if (cascadeState && cascadeState.currentStep === 'qa' && cascadeState.status === 'chunking') {
+      Logger.log('🔄 QA chunking complete, resuming cascade');
+      setCascadeState_('qa', 'completed');
+      scheduleCascadeTrigger_('runEmailReporting', 5); // Quick transition to email
+    }
+  }
+}
+
