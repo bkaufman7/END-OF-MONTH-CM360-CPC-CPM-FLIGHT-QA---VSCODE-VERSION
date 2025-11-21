@@ -300,8 +300,9 @@ function loadIgnoreAdvertisers() {
       updates.push([o.row, o.set.size]);
     });
     if (updates.length > 0) {
+      updates.sort((a, b) => a[0] - b[0]);
       const updateData = updates.map(u => [u[1]]);
-      const startRow = Math.min(...updates.map(u => u[0]));
+      const startRow = updates[0][0];
       sheet.getRange(startRow, 2, updates.length, 1).setValues(updateData);
     }
   }
