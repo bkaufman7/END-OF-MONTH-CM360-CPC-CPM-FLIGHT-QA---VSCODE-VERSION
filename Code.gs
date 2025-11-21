@@ -37,27 +37,17 @@ function authorizeMail_() {
 }
 
 // ---------------------
-// Create cascading triggers for better timeout management
+// Create an installable time trigger for the email-only run
 // ---------------------
-function createCascadingTriggers() {
-  // Clear any existing cascade triggers first
-  clearAllCascadeTriggers_();
-  
-  // Trigger 1: Data Ingestion at 1:15 AM (after files arrive 12:42-12:56 AM)
-  ScriptApp.newTrigger('runDataIngestion')
+function createDailyEmailTrigger() {
+  // Runs runDailyEmailSummary daily at 9am local time with full auth
+  ScriptApp.newTrigger('runDailyEmailSummary')
     .timeBased()
-    .atHour(1)
-    .nearMinute(15)
+    .atHour(9)       // change if you prefer another hour
     .everyDays(1)
     .create();
-    
-  Logger.log('✅ Created cascading triggers: Data Ingestion (1:15 AM) → QA Processing → Email Reporting');
 }
 
-// Legacy function - kept for backward compatibility
-function createDailyEmailTrigger() {
-  createCascadingTriggers();
-}
 
 
 
@@ -304,9 +294,16 @@ function loadIgnoreAdvertisers() {
       const net = r[m["Network ID"]];
       if (adv && ignoreMap[adv]) ignoreMap[adv].set.add(net);
     });
+    // Batch write all counts at once
+    const updates = [];
     Object.values(ignoreMap).forEach(function(o){
-      sheet.getRange(o.row, 2).setValue(o.set.size);
+      updates.push([o.row, o.set.size]);
     });
+    if (updates.length > 0) {
+      const updateData = updates.map(u => [u[1]]);
+      const startRow = Math.min(...updates.map(u => u[0]));
+      sheet.getRange(startRow, 2, updates.length, 1).setValues(updateData);
+    }
   }
 
   return new Set(Object.keys(ignoreMap));
@@ -430,7 +427,7 @@ function sendPerformanceSpikeAlertIfPre15() {
   uniqueEmails.forEach(function(addr){
     try {
       MailApp.sendEmail({ to: addr, subject: subject, htmlBody: table });
-      Utilities.sleep(300);
+      Utilities.sleep(500);
     } catch (err) {
       Logger.log('❌ Failed to email ' + addr + ': ' + err);
     }
@@ -920,7 +917,7 @@ function scoreAndLabelLowPriority_(placementName, clicks, impr, rowIdOrIndex, ga
 function runQAOnly() {
   // Prevent overlapping runs
   const dlock = LockService.getDocumentLock();
-  if (!dlock.tryLock(5000)) { scheduleNextQAChunk_(2); return; }
+  if (!dlock.tryLock(30000)) { scheduleNextQAChunk_(2); return; }
 
   // Clear any stale scheduled id right as we start a chunk
   cancelQAChunkTrigger_();
@@ -971,6 +968,11 @@ function runQAOnly() {
       const row = data[r];
       const adv  = row[m["Advertiser"]] && String(row[m["Advertiser"]]).trim();
       const camp = row[m["Campaign"]]   || "";
+
+      // Progress logging every 500 rows
+      if (processed > 0 && processed % 500 === 0) {
+        Logger.log('[runQAOnly] Progress: Processed ' + processed + ' rows in current chunk');
+      }
 
       const advLower = adv ? adv.toLowerCase() : "";
       if (advLower && (ignoreSet.has(advLower) || advLower.includes("bidmanager"))) { state.next = r + 1; continue; }
@@ -1511,7 +1513,7 @@ const immediateAttentionHtml = buildImmediateAttentionByOwner_(); // still insid
   const xlsxBlob = createXLSXFromSheet(sheet).setName(fileName);
 
   // Assemble body
-  const subject = "CM360 CPC/CPM FLIGHT QA – " + todayformatted;
+  const subject = "!!!TESTING VS CODE VERSION!!!!!CM360 CPC/CPM FLIGHT QA – " + todayformatted;
   let htmlBody =
       networkSummary
     + '<p>The below is a table of the following Billing, Delivery, Performance and Cost issues:</p>'
@@ -1531,7 +1533,7 @@ const immediateAttentionHtml = buildImmediateAttentionByOwner_(); // still insid
   uniqueEmails.forEach(function(addr){
     try {
       MailApp.sendEmail({ to: addr, subject: subject, htmlBody: htmlBody, attachments: [xlsxBlob] });
-      Utilities.sleep(300);
+      Utilities.sleep(500);
     } catch (err) {
       Logger.log("Failed to email " + addr + ": " + err);
     }
@@ -1574,7 +1576,7 @@ function logStep_(label, fn, runStartMs, quotaMinutes) {
 }
 
 // ---------------------
-// runItAll (with execution logging per step)
+// runItAll (with execution logging per step) — MANUAL USE
 // ---------------------
 function runItAll() {
   var APPROX_QUOTA_MINUTES = 6; // leave at 6 unless your domain truly has more
@@ -1612,6 +1614,67 @@ function runItAll() {
   }
 }
 
+// ---------------------
+// runItAllMorning (no email, for time-driven trigger)
+// ---------------------
+function runItAllMorning() {
+  var APPROX_QUOTA_MINUTES = 6; // same budget, but we stop before email
+  var runStart = Date.now();
+  Logger.log('🚀 runItAllMorning — START @ ' + new Date(runStart).toISOString()
+             + ' (approx quota: ' + APPROX_QUOTA_MINUTES + ' min)');
+
+  try {
+    // 1) Prep & ingest
+    logStep_('trimAllSheetsToData_', function(){ trimAllSheetsToData_(); }, runStart, APPROX_QUOTA_MINUTES);
+    logStep_('importDCMReports',     function(){ importDCMReports();      }, runStart, APPROX_QUOTA_MINUTES);
+
+    // 2) If low on time, schedule QA and exit (handoff)
+    var totalMs  = Date.now() - runStart;
+    var quotaMs  = APPROX_QUOTA_MINUTES * 60 * 1000;
+    var timeLeft = Math.max(0, quotaMs - totalMs);
+
+    if (timeLeft < 2 * 60 * 1000) {
+      Logger.log('⏭ Not enough time left for QA (' + Math.floor(timeLeft/1000) + 's). Scheduling QA handoff.');
+      clearQAState_();           // ensure a fresh QA session
+      cancelQAChunkTrigger_();   // clear any stale chunk trigger
+      scheduleNextQAChunk_(1);   // kick off the first QA chunk shortly
+      return;                    // exit cleanly to avoid hitting the 6-min wall
+    }
+
+    // 3) Run at most one QA chunk now
+    logStep_('runQAOnly (single chunk)', function(){ runQAOnly(); }, runStart, APPROX_QUOTA_MINUTES);
+
+    // 4) Performance spike alert (fast; safe to keep here)
+    logStep_('sendPerformanceSpikeAlertIfPre15', function(){ sendPerformanceSpikeAlertIfPre15(); }, runStart, APPROX_QUOTA_MINUTES);
+
+    // ❌ NO sendEmailSummary here — that gets its own trigger/window
+  } finally {
+    var totalMs = Date.now() - runStart;
+    Logger.log('🏁 runItAllMorning — FINISHED in ' + fmtMs_(totalMs));
+  }
+}
+
+// ---------------------
+// runDailyEmailSummary (email only, for separate trigger)
+// ---------------------
+function runDailyEmailSummary() {
+  var APPROX_QUOTA_MINUTES = 6;
+  var runStart = Date.now();
+  Logger.log('🚀 runDailyEmailSummary — START @ ' + new Date(runStart).toISOString()
+             + ' (approx quota: ' + APPROX_QUOTA_MINUTES + ' min)');
+
+  try {
+    // sendEmailSummary already:
+    //  - skips if QA still has an active session
+    //  - skips before the 15th of the month
+    logStep_('sendEmailSummary', function(){ sendEmailSummary(); }, runStart, APPROX_QUOTA_MINUTES);
+  } finally {
+    var totalMs = Date.now() - runStart;
+    Logger.log('🏁 runDailyEmailSummary — FINISHED in ' + fmtMs_(totalMs));
+  }
+}
+
+
 
 // ---------------------
 // arrayToCsv (utility)
@@ -1642,157 +1705,3 @@ function trimAllSheetsToData_() {
     }
   });
 }
-
-
-// ====== CASCADING TRIGGER SYSTEM ======
-
-const CASCADE_STATE_KEY = 'cascade_progress_v1';
-const CASCADE_TRIGGER_PREFIX = 'cascade_';
-
-// --- CASCADE TRIGGER MANAGEMENT ---
-function clearAllCascadeTriggers_() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(function(trigger) {
-    const funcName = trigger.getHandlerFunction();
-    if (funcName.startsWith('run') && (funcName.includes('Ingestion') || funcName.includes('QAProcessing') || funcName.includes('EmailReporting'))) {
-      ScriptApp.deleteTrigger(trigger);
-      Logger.log('🗑️ Removed trigger: ' + funcName);
-    }
-  });
-}
-
-function scheduleCascadeTrigger_(functionName, delayMinutes) {
-  // Clear any existing trigger for this function
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === functionName) {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-  
-  // Create new trigger
-  const newTrigger = ScriptApp.newTrigger(functionName)
-    .timeBased()
-    .after(delayMinutes * 60 * 1000)
-    .create();
-    
-  Logger.log('⏰ Scheduled ' + functionName + ' in ' + delayMinutes + ' minutes');
-  return newTrigger.getUniqueId();
-}
-
-function setCascadeState_(step, status, data) {
-  const state = {
-    currentStep: step,
-    status: status,
-    timestamp: new Date().toISOString(),
-    data: data || {}
-  };
-  PropertiesService.getDocumentProperties().setProperty(CASCADE_STATE_KEY, JSON.stringify(state));
-}
-
-function getCascadeState_() {
-  const raw = PropertiesService.getDocumentProperties().getProperty(CASCADE_STATE_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-// --- CASCADE STEP 1: DATA INGESTION ---
-function runDataIngestion() {
-  try {
-    setCascadeState_('ingestion', 'started');
-    Logger.log('🚀 CASCADE STEP 1: Data Ingestion - START');
-    
-    // Trim sheets and import data
-    trimAllSheetsToData_();
-    importDCMReports();
-    
-    setCascadeState_('ingestion', 'completed');
-    Logger.log('✅ CASCADE STEP 1: Data Ingestion - COMPLETED');
-    
-    // Schedule next step
-    scheduleCascadeTrigger_('runQAProcessing', 15); // 15 minutes later
-    
-  } catch (error) {
-    setCascadeState_('ingestion', 'failed', { error: error.toString() });
-    Logger.log('❌ CASCADE STEP 1: Data Ingestion - FAILED: ' + error.toString());
-    
-    // Still proceed to QA step in case of partial success
-    scheduleCascadeTrigger_('runQAProcessing', 20); // 20 minutes later with extra buffer
-  }
-}
-
-// --- CASCADE STEP 2: QA PROCESSING ---
-function runQAProcessing() {
-  try {
-    setCascadeState_('qa', 'started');
-    Logger.log('🚀 CASCADE STEP 2: QA Processing - START');
-    
-    // Run QA (this will handle chunking automatically)
-    runQAOnly();
-    
-    // Send performance alerts if pre-15th
-    sendPerformanceSpikeAlertIfPre15();
-    
-    // Check if QA is truly complete
-    const qaState = getQAState_();
-    if (qaState && qaState.session) {
-      // QA is still running in chunks, let it complete first
-      Logger.log('⏳ CASCADE STEP 2: QA still chunking, will wait for completion');
-      setCascadeState_('qa', 'chunking');
-      // Don't schedule email yet - QA chunking will handle final step
-      return;
-    }
-    
-    setCascadeState_('qa', 'completed');
-    Logger.log('✅ CASCADE STEP 2: QA Processing - COMPLETED');
-    
-    // Schedule final step
-    scheduleCascadeTrigger_('runEmailReporting', 15); // 15 minutes later
-    
-  } catch (error) {
-    setCascadeState_('qa', 'failed', { error: error.toString() });
-    Logger.log('❌ CASCADE STEP 2: QA Processing - FAILED: ' + error.toString());
-    
-    // Still proceed to email step for any available data
-    scheduleCascadeTrigger_('runEmailReporting', 20);
-  }
-}
-
-// --- CASCADE STEP 3: EMAIL REPORTING ---
-function runEmailReporting() {
-  try {
-    setCascadeState_('email', 'started');
-    Logger.log('🚀 CASCADE STEP 3: Email Reporting - START');
-    
-    // Send email summary (has built-in >15th filter)
-    sendEmailSummary();
-    
-    setCascadeState_('email', 'completed');
-    Logger.log('✅ CASCADE STEP 3: Email Reporting - COMPLETED');
-    Logger.log('🏁 CASCADE COMPLETE: All steps finished');
-    
-    // Clear cascade state
-    PropertiesService.getDocumentProperties().deleteProperty(CASCADE_STATE_KEY);
-    
-  } catch (error) {
-    setCascadeState_('email', 'failed', { error: error.toString() });
-    Logger.log('❌ CASCADE STEP 3: Email Reporting - FAILED: ' + error.toString());
-  }
-}
-
-// Enhanced QA chunk runner that integrates with cascade
-function runQAChunkAndCheckComplete() {
-  runQAOnly(); // Run the QA chunk
-  
-  // Check if QA is complete
-  const qaState = getQAState_();
-  if (!qaState || !qaState.session) {
-    // QA is complete, check if we're in a cascade
-    const cascadeState = getCascadeState_();
-    if (cascadeState && cascadeState.currentStep === 'qa' && cascadeState.status === 'chunking') {
-      Logger.log('🔄 QA chunking complete, resuming cascade');
-      setCascadeState_('qa', 'completed');
-      scheduleCascadeTrigger_('runEmailReporting', 5); // Quick transition to email
-    }
-  }
-}
-
