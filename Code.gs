@@ -2992,18 +2992,30 @@ function saveAttachmentToDrive_(attachment, folder, date) {
 // INTERNAL: Extract Date from Email Subject
 // ---------------------
 function extractDateFromSubject_(subject) {
-  // Subject format: "CM360 CPC/CPM FLIGHT QA – 11.25.25"
-  const match = subject.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
+  // Remove any prefixes (RE:, Fwd:, Automatic reply:, etc.)
+  const cleanSubject = subject.replace(/^(RE:|FWD:|Automatic reply:)\s*/i, '').trim();
   
-  if (!match) {
-    return null;
+  // Try format: "MM.DD.YY" (e.g., "11.25.25")
+  let match = cleanSubject.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
+  
+  if (match) {
+    const month = parseInt(match[1]) - 1; // JS months are 0-indexed
+    const day = parseInt(match[2]);
+    const year = 2000 + parseInt(match[3]); // Assuming 20xx
+    return new Date(year, month, day);
   }
   
-  const month = parseInt(match[1]) - 1; // JS months are 0-indexed
-  const day = parseInt(match[2]);
-  const year = 2000 + parseInt(match[3]); // Assuming 20xx
+  // Try format: "M/D/YY" (e.g., "4/30/25")
+  match = cleanSubject.match(/(\d{1,2})\/(\d{1,2})\/(\d{2})/);
   
-  return new Date(year, month, day);
+  if (match) {
+    const month = parseInt(match[1]) - 1; // JS months are 0-indexed
+    const day = parseInt(match[2]);
+    const year = 2000 + parseInt(match[3]); // Assuming 20xx
+    return new Date(year, month, day);
+  }
+  
+  return null;
 }
 
 // ---------------------
