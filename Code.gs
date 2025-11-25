@@ -1757,12 +1757,12 @@ const V2_COLORS = {
   STALE_LOW: "#d9ead3"       // Light green
 };
 
-// V2 Headers (18 columns - streamlined from original 25)
+// V2 Headers (22 columns - includes billing breakdown)
 const V2_HEADERS = [
   "Priority", "Status", "Owner (Ops)", "Network ID", "Network Name", "Advertiser",
   "Placement ID", "Placement Name", "Flight Dates", "Issue Category", "Issue Severity",
   "Specific Issue", "Impressions", "Clicks", "CTR %", "$CPC", "$CPM",
-  "Days Stale", "$ At Risk", "Action Required"
+  "Days Stale", "Expected Cost", "Actual Cost", "Overcharge", "Action Required"
 ];
 
 // ---------------------
@@ -1866,7 +1866,10 @@ function transformToV2Row_(row, vMap, networkNameMap) {
   const status = calculateStatus_(priority, issueSeverity, issueCategory, cpc, placementEnd, reportDate);
   const specificIssue = formatSpecificIssue_(issueType, details, impressions, clicks, cpc, cpm);
   const daysStale = calculateDaysStale_(lastImpChange, lastClkChange, reportDate);
-  const atRisk = calculateFinancialImpact_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate);
+  
+  // Calculate billing costs using Google's dual methodology
+  const billingCalc = calculateGoogleBilling_(impressions, clicks, cpc, cpm);
+  const atRisk = calculateFinancialImpact_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate, billingCalc);
   
   return [
     priority,           // Priority (⭐⭐⭐ / ⭐⭐ / ⭐)
@@ -1887,7 +1890,9 @@ function transformToV2Row_(row, vMap, networkNameMap) {
     "$" + cpc.toFixed(2), // $CPC
     "$" + cpm.toFixed(2), // $CPM
     daysStale,          // Days Stale
-    "$" + atRisk.toFixed(2), // $ At Risk
+    "$" + billingCalc.expectedCost.toFixed(2), // Expected Cost
+    "$" + billingCalc.actualCost.toFixed(2),   // Actual Cost
+    "$" + billingCalc.overcharge.toFixed(2),   // Overcharge
     ""                  // Action Required (blank for manual entry)
   ];
 }
@@ -1927,6 +1932,68 @@ function buildNetworkNameMap_() {
   
   Logger.log(`[V2] Loaded ${Object.keys(map).length} network names`);
   return map;
+}
+
+// ---------------------
+// HELPER: Calculate Google Billing (Dual Methodology)
+// ---------------------
+function calculateGoogleBilling_(imp, clk, cpc, cpm) {
+  let expectedCost = 0;
+  let actualCost = 0;
+  let overcharge = 0;
+  
+  // Google's billing methodology:
+  // 1. CPC only (no CPM): Bill all clicks at CPC
+  // 2. CPM only (no CPC): Bill all impressions at CPM
+  // 3. Both present + Impressions > Clicks: Bill impressions at CPM (normal)
+  // 4. Both present + Clicks > Impressions: Bill impressions at CPM + excess clicks at CPC (RISK!)
+  
+  const hasCPC = cpc > 0;
+  const hasCPM = cpm > 0;
+  
+  if (!hasCPC && !hasCPM) {
+    // No pricing - no cost
+    return { expectedCost: 0, actualCost: 0, overcharge: 0 };
+  }
+  
+  if (hasCPC && !hasCPM) {
+    // CPC only billing
+    actualCost = clk * cpc;
+    expectedCost = actualCost; // This is normal
+    overcharge = 0;
+  } else if (hasCPM && !hasCPC) {
+    // CPM only billing
+    actualCost = (imp / 1000) * cpm;
+    expectedCost = actualCost; // This is normal
+    overcharge = 0;
+  } else if (hasCPC && hasCPM) {
+    // Both metrics present - check for dual billing scenario
+    if (imp >= clk) {
+      // Normal: Impressions >= Clicks, billed at CPM
+      actualCost = (imp / 1000) * cpm;
+      expectedCost = actualCost;
+      overcharge = 0;
+    } else {
+      // BILLING RISK: Clicks > Impressions
+      // Expected: Should only pay CPM for impressions
+      expectedCost = (imp / 1000) * cpm;
+      
+      // Actual: Google bills CPM for impressions + CPC for excess clicks
+      const cpmCost = (imp / 1000) * cpm;
+      const excessClicks = clk - imp;
+      const cpcCost = excessClicks * cpc;
+      actualCost = cpmCost + cpcCost;
+      
+      // Overcharge = the extra CPC charge
+      overcharge = cpcCost;
+    }
+  }
+  
+  return {
+    expectedCost: expectedCost,
+    actualCost: actualCost,
+    overcharge: overcharge
+  };
 }
 
 // ---------------------
@@ -2088,15 +2155,13 @@ function calculateDaysStale_(lastImpChange, lastClkChange, reportDate) {
 // ---------------------
 // HELPER: Calculate Financial Impact ($ At Risk)
 // ---------------------
-function calculateFinancialImpact_(issueType, imp, clk, cpc, cpm, placementEnd, reportDate) {
+function calculateFinancialImpact_(issueType, imp, clk, cpc, cpm, placementEnd, reportDate, billingCalc) {
   const types = issueType.toUpperCase();
   let atRisk = 0;
   
-  // BILLING RISK: If clicks > impressions on CPC placement
-  if (types.includes("BILLING") && types.includes("CPC") && clk > imp && cpc > 0) {
-    // Potential overbilling = excess clicks × CPC
-    const excessClicks = clk - imp;
-    atRisk += excessClicks * cpc;
+  // BILLING RISK: Use the overcharge from Google's dual billing calculation
+  if (types.includes("BILLING") && billingCalc && billingCalc.overcharge > 0) {
+    atRisk += billingCalc.overcharge;
   }
   
   // PERFORMANCE WASTE: Potential bot traffic (CTR ≥ 90% + high CPM)
@@ -2109,8 +2174,11 @@ function calculateFinancialImpact_(issueType, imp, clk, cpc, cpm, placementEnd, 
   const end = placementEnd instanceof Date ? placementEnd : new Date(placementEnd);
   const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
   if (types.includes("DELIVERY") && !isNaN(end) && end < report) {
-    // Estimate all current impressions are post-flight waste
-    if (cpm > 0) {
+    // Estimate all current spend is post-flight waste
+    // Use actual cost from billing calculation if available
+    if (billingCalc && billingCalc.actualCost > 0) {
+      atRisk += billingCalc.actualCost;
+    } else if (cpm > 0) {
       atRisk += (imp * cpm) / 1000;
     } else if (cpc > 0) {
       atRisk += clk * cpc;
@@ -2156,8 +2224,10 @@ function formatV2Sheet_(sheet) {
   sheet.setColumnWidth(16, 80);  // $CPC
   sheet.setColumnWidth(17, 80);  // $CPM
   sheet.setColumnWidth(18, 90);  // Days Stale
-  sheet.setColumnWidth(19, 100); // $ At Risk
-  sheet.setColumnWidth(20, 150); // Action Required
+  sheet.setColumnWidth(19, 110); // Expected Cost
+  sheet.setColumnWidth(20, 110); // Actual Cost
+  sheet.setColumnWidth(21, 110); // Overcharge
+  sheet.setColumnWidth(22, 150); // Action Required
   
   // Auto-resize row heights
   sheet.setRowHeights(2, sheet.getMaxRows() - 1, 21);
@@ -2242,8 +2312,18 @@ function applyV2ConditionalFormatting_(sheet) {
       .build()
   ];
   
+  // Overcharge column (U/21) - Highlight any overcharges
+  const overchargeRules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextNotEqualTo("$0.00")
+      .setBackground("#f4cccc")  // Light red
+      .setBold(true)
+      .setRanges([sheet.getRange(2, 21, lastRow - 1, 1)])
+      .build()
+  ];
+  
   // Combine all rules
-  const allRules = [].concat(priorityRules, statusRules, staleRules, flightRules);
+  const allRules = [].concat(priorityRules, statusRules, staleRules, flightRules, overchargeRules);
   sheet.setConditionalFormatRules(allRules);
   
   Logger.log(`[V2] Applied ${allRules.length} conditional formatting rules`);
@@ -2344,14 +2424,14 @@ function generateMonthlySummaryReport() {
     const category = String(row[hMap["Issue Category"]] || "OTHER");
     const owner = String(row[hMap["Owner (Ops)"]] || "Unassigned");
     const severity = row[hMap["Issue Severity"]] || 1;
-    const atRiskStr = String(row[hMap["$ At Risk"]] || "$0");
-    const atRisk = parseFloat(atRiskStr.replace("$", "")) || 0;
+    const overchargeStr = String(row[hMap["Overcharge"]] || "$0");
+    const overcharge = parseFloat(overchargeStr.replace("$", "")) || 0;
     
     if (status.includes("🔴")) urgentCount++;
     else if (status.includes("🟡")) reviewCount++;
     else if (status.includes("🟢")) monitorCount++;
     
-    totalAtRisk += atRisk;
+    totalAtRisk += overcharge; // Use overcharge instead of old "$ At Risk"
     
     categoryBreakdown[category] = (categoryBreakdown[category] || 0) + 1;
     ownerBreakdown[owner] = (ownerBreakdown[owner] || 0) + 1;
@@ -2449,32 +2529,35 @@ function displayFinancialImpact() {
   headers.forEach((h, i) => { hMap[h] = i; });
   
   let totalAtRisk = 0;
+  let totalOvercharge = 0;
   let billingRisk = 0;
   let performanceWaste = 0;
   let postFlightSpend = 0;
   
   rows.forEach(row => {
     const category = String(row[hMap["Issue Category"]] || "");
-    const atRiskStr = String(row[hMap["$ At Risk"]] || "$0");
-    const atRisk = parseFloat(atRiskStr.replace("$", "")) || 0;
+    const overchargeStr = String(row[hMap["Overcharge"]] || "$0");
+    const overcharge = parseFloat(overchargeStr.replace("$", "")) || 0;
     
-    totalAtRisk += atRisk;
+    totalOvercharge += overcharge;
     
-    if (category === "BILLING") billingRisk += atRisk;
-    if (category === "PERFORMANCE") performanceWaste += atRisk;
-    if (category === "DELIVERY") postFlightSpend += atRisk;
+    if (category === "BILLING") billingRisk += overcharge;
+    if (category === "PERFORMANCE") performanceWaste += overcharge;
+    if (category === "DELIVERY") postFlightSpend += overcharge;
   });
   
   const message = `💰 FINANCIAL IMPACT ANALYSIS\n\n` +
-    `Total $ At Risk: $${totalAtRisk.toFixed(2)}\n\n` +
+    `Total Overcharge (Billing Risk): $${totalOvercharge.toFixed(2)}\n\n` +
     `Breakdown:\n` +
-    `  • Billing Risk: $${billingRisk.toFixed(2)}\n` +
+    `  • Billing Overcharge: $${billingRisk.toFixed(2)}\n` +
     `  • Performance Waste: $${performanceWaste.toFixed(2)}\n` +
     `  • Post-Flight Spend: $${postFlightSpend.toFixed(2)}\n\n` +
+    `Note: Billing Overcharge shows the dual billing impact where\n` +
+    `Google charges CPM for impressions + CPC for excess clicks.\n\n` +
     `This represents potential savings from catching and resolving these violations.`;
   
   SpreadsheetApp.getUi().alert(message);
-  Logger.log(`[V2] Financial Impact - Total: $${totalAtRisk.toFixed(2)}`);
+  Logger.log(`[V2] Financial Impact - Total Overcharge: $${totalOvercharge.toFixed(2)}`);
 }
 
 // =====================================================================================================================
