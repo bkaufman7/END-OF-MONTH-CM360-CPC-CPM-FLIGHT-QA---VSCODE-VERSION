@@ -3285,6 +3285,9 @@ function processNetworkMonthRawData_(networkId, networkName, year, month) {
   const monthStr = String(month).padStart(2, '0');
   const monthNameStr = getMonthName_(month);
   
+  // Load network map once for this entire month
+  const networkMap = loadNetworkMapping_();
+  
   // Search Gmail for this network-month's raw data
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59); // Last day of month
@@ -3310,8 +3313,8 @@ function processNetworkMonthRawData_(networkId, networkName, year, month) {
       for (const attachment of attachments) {
         const filename = attachment.getName();
         
-        // Extract network ID from filename
-        const fileNetworkId = extractNetworkIdFromFilename_(filename);
+        // Extract network ID from filename (pass networkMap to avoid reloading)
+        const fileNetworkId = extractNetworkIdFromFilename_(filename, networkMap);
         
         // Only process if this file belongs to current network
         if (fileNetworkId !== networkId) {
@@ -3450,7 +3453,7 @@ function saveRawDataToDrive_(attachment, folder, networkId, date) {
 // ---------------------
 // INTERNAL: Extract Network ID from Filename
 // ---------------------
-function extractNetworkIdFromFilename_(filename) {
+function extractNetworkIdFromFilename_(filename, networkMap) {
   // Filename patterns might include network ID
   // Examples: "898158_report.csv", "DCM_898158.zip", etc.
   // Try to extract any number sequence that matches known network IDs
@@ -3460,9 +3463,6 @@ function extractNetworkIdFromFilename_(filename) {
   if (!matches) {
     return null;
   }
-  
-  // Load network map to validate
-  const networkMap = loadNetworkMapping_();
   
   // Check each number found to see if it's a valid network ID
   for (const match of matches) {
