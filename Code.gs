@@ -3059,7 +3059,7 @@ function archiveAllRawData() {
     'Expected: ~9,120 files across 38 networks\n' +
     'Processing: 1 network-month per execution\n' +
     'Total chunks: ~304 automatic executions\n' +
-    'You will receive email updates every 10 chunks.\n\n' +
+    'You will receive email updates after each network completes.\n\n' +
     'This will take several hours to complete automatically.\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
@@ -3233,20 +3233,24 @@ function processNextRawDataChunk_() {
     
     props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
     
-    // Send progress email every 10 chunks
-    if (state.chunksCompleted % 10 === 0) {
+    // Send progress email after each network completes (all 8 months done)
+    if (state.currentMonth === 4 && state.currentNetworkIndex > 0) {
+      // Just finished a network (month reset to 4 means we moved to next network)
+      const prevNetworkId = state.networkIds[state.currentNetworkIndex - 1];
+      const prevNetworkName = state.networkMap[prevNetworkId];
       const totalChunks = state.networkIds.length * 8;
       const percentComplete = ((state.chunksCompleted / totalChunks) * 100).toFixed(1);
       
       MailApp.sendEmail({
         to: 'platformsolutionsadopshorizon@gmail.com',
-        subject: `📦 CM360 Raw Data Archive: ${state.chunksCompleted}/${totalChunks} (${percentComplete}%)`,
-        htmlBody: `<h3>Raw Data Archive Progress Update</h3>
-          <p><strong>Chunks completed:</strong> ${state.chunksCompleted} / ${totalChunks} (${percentComplete}%)</p>
-          <p><strong>Latest:</strong> ${networkName} - ${getMonthName_(state.currentMonth - 1)} ${state.currentYear}</p>
-          <p><strong>Files saved:</strong> ${chunkStats.filesSaved}</p>
+        subject: `📦 CM360 Raw Data: ${prevNetworkName} Complete (${state.currentNetworkIndex}/${state.networkIds.length})`,
+        htmlBody: `<h3>${prevNetworkName} (${prevNetworkId}) Complete</h3>
+          <p><strong>Networks completed:</strong> ${state.currentNetworkIndex} / ${state.networkIds.length}</p>
+          <p><strong>Overall progress:</strong> ${state.chunksCompleted} / ${totalChunks} chunks (${percentComplete}%)</p>
+          <p><strong>Files saved this network:</strong> 8 months archived</p>
           <p><strong>Total files saved:</strong> ${state.filesSaved}</p>
           <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
+          <p><strong>Next network:</strong> ${state.networkMap[state.networkIds[state.currentNetworkIndex]] || 'Complete'}</p>
           <p>Archive continues automatically...</p>`
       });
     }
