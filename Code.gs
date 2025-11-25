@@ -2312,10 +2312,10 @@ function applyV2ConditionalFormatting_(sheet) {
       .build()
   ];
   
-  // Overcharge column (U/21) - Highlight any overcharges
+  // Overcharge column (U/21) - Highlight any overcharges > $0
   const overchargeRules = [
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextNotEqualTo("$0.00")
+      .whenFormulaSatisfied('=VALUE(SUBSTITUTE(U2,"$",""))>0')
       .setBackground("#f4cccc")  // Light red
       .setBold(true)
       .setRanges([sheet.getRange(2, 21, lastRow - 1, 1)])
