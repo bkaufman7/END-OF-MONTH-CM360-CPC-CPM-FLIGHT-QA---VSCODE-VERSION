@@ -32,6 +32,11 @@ function onOpen() {
       .addItem("📅 Archive Single Month", "archiveSingleMonth")
       .addItem("📊 View Archive Progress", "viewArchiveProgress")
       .addItem("🔄 Resume Archive", "resumeArchive"))
+    .addSeparator()
+    .addSubMenu(ui.createMenu("📦 Raw Data Archive")
+      .addItem("📦 Archive All Raw Data (Apr-Nov 2025)", "archiveAllRawData")
+      .addItem("📊 View Raw Data Progress", "viewRawDataProgress")
+      .addItem("🔄 Resume Raw Data Archive", "resumeRawDataArchive"))
     .addToUi();
 }
 
@@ -3028,6 +3033,448 @@ function getMonthName_(month) {
 }
 
 // =====================================================================================================================
+// ======================================= END HISTORICAL ARCHIVE SYSTEM ===============================================
+// =====================================================================================================================
+
+
+// =====================================================================================================================
+// =========================================== RAW DATA ARCHIVE SYSTEM =================================================
+// =====================================================================================================================
+
+// ---------------------
+// CONSTANTS
+// ---------------------
+const RAW_DATA_FOLDER_ID = '1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN'; // Same root as other archives
+const RAW_DATA_SEARCH_SUBJECT = 'BKCM360 Global QA Check';
+const RAW_BATCH_SIZE = 50; // Process 50 emails per network-month (safe for 6-min limit)
+
+// ---------------------
+// MAIN: Archive All Raw Data (April-November 2025)
+// ---------------------
+function archiveAllRawData() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Archive Raw Data',
+    'This will process ALL raw data from April-November 2025.\n\n' +
+    'Expected: ~9,120 files across 38 networks\n' +
+    'Processing: 1 network-month per execution\n' +
+    'Total chunks: ~304 automatic executions\n' +
+    'You will receive email updates every 10 chunks.\n\n' +
+    'This will take several hours to complete automatically.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    ui.alert('Archive cancelled.');
+    return;
+  }
+  
+  // Load network mapping from Networks tab
+  const networkMap = loadNetworkMapping_();
+  
+  if (Object.keys(networkMap).length === 0) {
+    ui.alert('Error', 'No networks found in Networks tab (columns A & B).', ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Initialize archive state
+  const props = PropertiesService.getScriptProperties();
+  const networkIds = Object.keys(networkMap).sort();
+  
+  props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify({
+    status: 'running',
+    currentNetworkIndex: 0,
+    currentMonth: 4, // Start with April
+    currentYear: 2025,
+    emailsProcessed: 0,
+    filesExtracted: 0,
+    filesSaved: 0,
+    networkIds: networkIds,
+    networkMap: networkMap,
+    chunksCompleted: 0,
+    startTime: new Date().toISOString()
+  }));
+  
+  ui.alert(
+    'Archive Started',
+    `Starting archive of ${networkIds.length} networks × 8 months.\n\n` +
+    'The system will run automatically. Check progress with "View Raw Data Progress".',
+    ui.ButtonSet.OK
+  );
+  
+  // Start processing
+  processNextRawDataChunk_();
+}
+
+// ---------------------
+// View Raw Data Archive Progress
+// ---------------------
+function viewRawDataProgress() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!stateJson) {
+    ui.alert('Raw Data Archive Progress', 'No archive in progress.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  const networkName = state.networkMap[state.networkIds[state.currentNetworkIndex]] || 'Unknown';
+  const monthName = getMonthName_(state.currentMonth);
+  const totalChunks = state.networkIds.length * 8; // 38 networks × 8 months
+  const percentComplete = ((state.chunksCompleted / totalChunks) * 100).toFixed(1);
+  
+  ui.alert(
+    'Raw Data Archive Progress',
+    `Status: ${state.status}\n` +
+    `Progress: ${state.chunksCompleted} / ${totalChunks} chunks (${percentComplete}%)\n\n` +
+    `Current: ${networkName} (${state.networkIds[state.currentNetworkIndex]}) - ${monthName} ${state.currentYear}\n` +
+    `Emails processed: ${state.emailsProcessed}\n` +
+    `Files saved: ${state.filesSaved}\n` +
+    `Started: ${new Date(state.startTime).toLocaleString()}`,
+    ui.ButtonSet.OK
+  );
+}
+
+// ---------------------
+// Resume Raw Data Archive (if interrupted)
+// ---------------------
+function resumeRawDataArchive() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!stateJson) {
+    ui.alert('Resume Archive', 'No archive in progress to resume.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  if (state.status === 'completed') {
+    ui.alert('Resume Archive', 'Archive already completed.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const networkName = state.networkMap[state.networkIds[state.currentNetworkIndex]] || 'Unknown';
+  const response = ui.alert(
+    'Resume Archive',
+    `Resume from ${networkName} - ${getMonthName_(state.currentMonth)} ${state.currentYear}?\n\n` +
+    `Progress: ${state.chunksCompleted} chunks, ${state.filesSaved} files saved`,
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    return;
+  }
+  
+  processNextRawDataChunk_();
+}
+
+// ---------------------
+// INTERNAL: Process Next Chunk (recursive until complete)
+// ---------------------
+function processNextRawDataChunk_() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  
+  if (!stateJson) {
+    Logger.log('No raw data archive state found');
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  // Check if we're done (all networks × all months)
+  if (state.currentNetworkIndex >= state.networkIds.length) {
+    state.status = 'completed';
+    props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+    
+    // Send completion email
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '✅ CM360 Raw Data Archive Complete',
+      htmlBody: `<h3>Raw Data Archive Complete</h3>
+        <p><strong>Networks processed:</strong> ${state.networkIds.length}</p>
+        <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
+        <p><strong>Total files saved:</strong> ${state.filesSaved}</p>
+        <p><strong>Total chunks:</strong> ${state.chunksCompleted}</p>
+        <p><strong>Duration:</strong> ${new Date(state.startTime).toLocaleString()} - ${new Date().toLocaleString()}</p>
+        <p><strong>Location:</strong> <a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}">Raw Data Archive</a></p>`
+    });
+    
+    return;
+  }
+  
+  // Process current network-month
+  try {
+    const networkId = state.networkIds[state.currentNetworkIndex];
+    const networkName = state.networkMap[networkId];
+    
+    const chunkStats = processNetworkMonthRawData_(networkId, networkName, state.currentYear, state.currentMonth);
+    
+    state.emailsProcessed += chunkStats.emailsProcessed;
+    state.filesExtracted += chunkStats.filesExtracted;
+    state.filesSaved += chunkStats.filesSaved;
+    state.chunksCompleted++;
+    
+    // Move to next month
+    state.currentMonth++;
+    
+    // If finished all months for this network, move to next network
+    if (state.currentMonth > 11) {
+      state.currentMonth = 4; // Reset to April
+      state.currentNetworkIndex++;
+    }
+    
+    props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+    
+    // Send progress email every 10 chunks
+    if (state.chunksCompleted % 10 === 0) {
+      const totalChunks = state.networkIds.length * 8;
+      const percentComplete = ((state.chunksCompleted / totalChunks) * 100).toFixed(1);
+      
+      MailApp.sendEmail({
+        to: 'platformsolutionsadopshorizon@gmail.com',
+        subject: `📦 CM360 Raw Data Archive: ${state.chunksCompleted}/${totalChunks} (${percentComplete}%)`,
+        htmlBody: `<h3>Raw Data Archive Progress Update</h3>
+          <p><strong>Chunks completed:</strong> ${state.chunksCompleted} / ${totalChunks} (${percentComplete}%)</p>
+          <p><strong>Latest:</strong> ${networkName} - ${getMonthName_(state.currentMonth - 1)} ${state.currentYear}</p>
+          <p><strong>Files saved:</strong> ${chunkStats.filesSaved}</p>
+          <p><strong>Total files saved:</strong> ${state.filesSaved}</p>
+          <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
+          <p>Archive continues automatically...</p>`
+      });
+    }
+    
+    // Continue to next chunk
+    processNextRawDataChunk_();
+    
+  } catch (error) {
+    Logger.log('Error processing raw data chunk: ' + error);
+    
+    const networkId = state.networkIds[state.currentNetworkIndex];
+    const networkName = state.networkMap[networkId];
+    
+    // Send error email
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '⚠️ CM360 Raw Data Archive Error',
+      htmlBody: `<h3>Raw Data Archive Error</h3>
+        <p><strong>Network:</strong> ${networkName} (${networkId})</p>
+        <p><strong>Month:</strong> ${getMonthName_(state.currentMonth)} ${state.currentYear}</p>
+        <p><strong>Error:</strong> ${error}</p>
+        <p><strong>Progress:</strong> ${state.chunksCompleted} chunks, ${state.filesSaved} files saved</p>
+        <p>Use "Resume Raw Data Archive" to continue.</p>`
+    });
+  }
+}
+
+// ---------------------
+// INTERNAL: Process Single Network-Month Raw Data
+// ---------------------
+function processNetworkMonthRawData_(networkId, networkName, year, month) {
+  const monthStr = String(month).padStart(2, '0');
+  const monthNameStr = getMonthName_(month);
+  
+  // Search Gmail for this network-month's raw data
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59); // Last day of month
+  
+  // Search for emails with subject containing network ID or in date range
+  const query = `subject:"${RAW_DATA_SEARCH_SUBJECT}" after:${Math.floor(startDate.getTime()/1000)} before:${Math.floor(endDate.getTime()/1000)}`;
+  
+  const threads = GmailApp.search(query, 0, RAW_BATCH_SIZE);
+  
+  let emailsProcessed = 0;
+  let filesExtracted = 0;
+  let filesSaved = 0;
+  
+  // Get or create Drive folder for this network-month
+  const networkFolder = getOrCreateRawDataFolder_(networkId, networkName, year, month);
+  
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    
+    for (const message of messages) {
+      const attachments = message.getAttachments();
+      
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        
+        // Extract network ID from filename
+        const fileNetworkId = extractNetworkIdFromFilename_(filename);
+        
+        // Only process if this file belongs to current network
+        if (fileNetworkId !== networkId) {
+          continue;
+        }
+        
+        filesExtracted++;
+        
+        // Get date from email
+        const emailDate = message.getDate();
+        
+        // Handle ZIP files
+        if (filename.toLowerCase().endsWith('.zip')) {
+          const zipBlob = attachment.copyBlob();
+          const unzipped = Utilities.unzip(zipBlob);
+          
+          for (const file of unzipped) {
+            const unzippedName = file.getName().toLowerCase();
+            if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
+              saveRawDataToDrive_(file, networkFolder, networkId, emailDate);
+              filesSaved++;
+            }
+          }
+        }
+        // Handle CSV and XLSX files
+        else if (filename.toLowerCase().endsWith('.csv') || filename.toLowerCase().endsWith('.xlsx')) {
+          saveRawDataToDrive_(attachment, networkFolder, networkId, emailDate);
+          filesSaved++;
+        }
+      }
+      
+      emailsProcessed++;
+    }
+  }
+  
+  Logger.log(`Processed ${networkName} (${networkId}) - ${monthNameStr} ${year}: ${emailsProcessed} emails, ${filesSaved} files saved`);
+  
+  return {
+    emailsProcessed: emailsProcessed,
+    filesExtracted: filesExtracted,
+    filesSaved: filesSaved
+  };
+}
+
+// ---------------------
+// INTERNAL: Load Network Mapping from Networks Tab
+// ---------------------
+function loadNetworkMapping_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const networksSheet = ss.getSheetByName('Networks');
+  
+  if (!networksSheet) {
+    Logger.log('Networks tab not found');
+    return {};
+  }
+  
+  const data = networksSheet.getDataRange().getValues();
+  const networkMap = {};
+  
+  // Skip header row, read columns A (Network ID) and B (Network Name)
+  for (let i = 1; i < data.length; i++) {
+    const networkId = String(data[i][0]).trim();
+    const networkName = String(data[i][1]).trim();
+    
+    if (networkId && networkName) {
+      networkMap[networkId] = networkName;
+    }
+  }
+  
+  Logger.log(`Loaded ${Object.keys(networkMap).length} networks from Networks tab`);
+  return networkMap;
+}
+
+// ---------------------
+// INTERNAL: Get or Create Raw Data Folder Structure
+// ---------------------
+function getOrCreateRawDataFolder_(networkId, networkName, year, month) {
+  const monthStr = String(month).padStart(2, '0');
+  const monthNameStr = getMonthName_(month);
+  
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_FOLDER_ID);
+  
+  // Get or create "Raw Data" folder
+  let rawDataFolder;
+  const rawDataFolders = rootFolder.getFoldersByName('Raw Data');
+  if (rawDataFolders.hasNext()) {
+    rawDataFolder = rawDataFolders.next();
+  } else {
+    rawDataFolder = rootFolder.createFolder('Raw Data');
+  }
+  
+  // Get or create network folder: "898158 - A Place for Mom"
+  let networkFolder;
+  const networkFolderName = `${networkId} - ${networkName}`;
+  const networkFolders = rawDataFolder.getFoldersByName(networkFolderName);
+  if (networkFolders.hasNext()) {
+    networkFolder = networkFolders.next();
+  } else {
+    networkFolder = rawDataFolder.createFolder(networkFolderName);
+  }
+  
+  // Get or create month folder: "2025-04-April"
+  let monthFolder;
+  const monthFolderName = `${year}-${monthStr}-${monthNameStr}`;
+  const monthFolders = networkFolder.getFoldersByName(monthFolderName);
+  if (monthFolders.hasNext()) {
+    monthFolder = monthFolders.next();
+  } else {
+    monthFolder = networkFolder.createFolder(monthFolderName);
+  }
+  
+  return monthFolder;
+}
+
+// ---------------------
+// INTERNAL: Save Raw Data File to Drive
+// ---------------------
+function saveRawDataToDrive_(attachment, folder, networkId, date) {
+  const dateStr = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const originalName = attachment.getName();
+  const extension = originalName.substring(originalName.lastIndexOf('.'));
+  const filename = `CM360_Raw_${networkId}_${dateStr}${extension}`;
+  
+  // Check if file already exists
+  const existingFiles = folder.getFilesByName(filename);
+  if (existingFiles.hasNext()) {
+    Logger.log(`File already exists: ${filename}`);
+    return;
+  }
+  
+  // Create file
+  folder.createFile(attachment.copyBlob().setName(filename));
+  Logger.log(`Saved: ${filename}`);
+}
+
+// ---------------------
+// INTERNAL: Extract Network ID from Filename
+// ---------------------
+function extractNetworkIdFromFilename_(filename) {
+  // Filename patterns might include network ID
+  // Examples: "898158_report.csv", "DCM_898158.zip", etc.
+  // Try to extract any number sequence that matches known network IDs
+  
+  const matches = filename.match(/\d{3,7}/g); // Look for 3-7 digit numbers
+  
+  if (!matches) {
+    return null;
+  }
+  
+  // Load network map to validate
+  const networkMap = loadNetworkMapping_();
+  
+  // Check each number found to see if it's a valid network ID
+  for (const match of matches) {
+    if (networkMap[match]) {
+      return match;
+    }
+  }
+  
+  return null;
+}
+
+// =====================================================================================================================
+// ======================================= END RAW DATA ARCHIVE SYSTEM ================================================
+// =====================================================================================================================
+
+
 // ======================================= END HISTORICAL ARCHIVE SYSTEM ===============================================
 // =====================================================================================================================
 
