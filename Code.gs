@@ -15,10 +15,17 @@ function onOpen() {
     .addItem("Run QA Only", "runQAOnly")
     .addItem("Send Email Only", "sendEmailSummary")
     .addSeparator()
-    .addItem("Authorize Email (one-time)", "authorizeMail_")         // <-- add this
-    .addItem("Create Daily Email Trigger (9am)", "createDailyEmailTrigger") // <-- and this
+    .addItem("Authorize Email (one-time)", "authorizeMail_")
+    .addItem("Create Daily Email Trigger (9am)", "createDailyEmailTrigger")
     .addSeparator()
     .addItem("Clear Violations", "clearViolations")
+    .addSeparator()
+    .addSubMenu(ui.createMenu("📊 V2 Dashboard (BETA)")
+      .addItem("🎯 Generate V2 Dashboard", "generateViolationsV2Dashboard")
+      .addItem("💾 Export V2 to Drive", "exportV2ToDrive")
+      .addItem("📊 Monthly Summary Report", "generateMonthlySummaryReport")
+      .addItem("📈 Month-over-Month Analysis", "runMonthOverMonthAnalysis")
+      .addItem("💰 Calculate Financial Impact", "displayFinancialImpact"))
     .addToUi();
 }
 
@@ -1706,3 +1713,771 @@ function trimAllSheetsToData_() {
     }
   });
 }
+
+
+// =====================================================================================================================
+// ========================================== V2 DASHBOARD SYSTEM (BETA) ==============================================
+// =====================================================================================================================
+// 
+// Purpose: Enhanced violations dashboard with priority scoring, financial impact tracking, 
+//          Google Drive archiving, and month-over-month analysis
+//
+// Features:
+// - Priority-based scoring (⭐⭐⭐ / ⭐⭐ / ⭐)
+// - Status badges (🔴 URGENT | 🟡 REVIEW | 🟢 MONITOR)
+// - Financial impact calculation ($ At Risk)
+// - Google Drive monthly archiving
+// - Month-over-month trend analysis
+// - Conditional formatting with color coding
+// - Severity scoring (1-5 scale)
+// - Violation resolution tracking
+// =====================================================================================================================
+
+// ---------------------
+// V2 CONSTANTS & CONFIG
+// ---------------------
+const V2_SHEET_NAME = "Violations V2";
+const V2_DRIVE_FOLDER_ID = "1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN"; // Your Google Drive folder
+const V2_ADMIN_EMAIL = "platformsolutionsadopshorizon@gmail.com";
+
+// Color scheme for conditional formatting
+const V2_COLORS = {
+  URGENT_BG: "#cc0000",      // Dark red
+  URGENT_TEXT: "#ffffff",    // White
+  REVIEW_BG: "#ffd966",      // Yellow
+  REVIEW_TEXT: "#000000",    // Black
+  MONITOR_BG: "#93c47d",     // Light green
+  MONITOR_TEXT: "#000000",   // Black
+  PRIORITY_HIGH: "#f4cccc",  // Light red
+  PRIORITY_MED: "#fff2cc",   // Light yellow
+  PRIORITY_LOW: "#ffffff",   // White
+  STALE_SEVERE: "#ea9999",   // Salmon red
+  STALE_HIGH: "#f9cb9c",     // Orange
+  STALE_MED: "#ffe599",      // Light yellow
+  STALE_LOW: "#d9ead3"       // Light green
+};
+
+// V2 Headers (18 columns - streamlined from original 25)
+const V2_HEADERS = [
+  "Priority", "Status", "Owner (Ops)", "Network ID", "Network Name", "Advertiser",
+  "Placement ID", "Placement Name", "Flight Dates", "Issue Category", "Issue Severity",
+  "Specific Issue", "Impressions", "Clicks", "CTR %", "$CPC", "$CPM",
+  "Days Stale", "$ At Risk", "Action Required"
+];
+
+// ---------------------
+// V2 DASHBOARD GENERATION
+// ---------------------
+function generateViolationsV2Dashboard() {
+  const startTime = Date.now();
+  Logger.log("[V2] Starting dashboard generation...");
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const violationsSheet = ss.getSheetByName("Violations");
+  
+  if (!violationsSheet) {
+    SpreadsheetApp.getUi().alert("Error: Violations sheet not found. Run QA first.");
+    return;
+  }
+  
+  // Get or create V2 sheet
+  let v2Sheet = ss.getSheetByName(V2_SHEET_NAME);
+  if (v2Sheet) {
+    v2Sheet.clear();
+  } else {
+    v2Sheet = ss.insertSheet(V2_SHEET_NAME);
+  }
+  
+  // Load source data from Violations tab
+  const violationsData = violationsSheet.getDataRange().getValues();
+  if (violationsData.length < 2) {
+    SpreadsheetApp.getUi().alert("No violations found to process.");
+    return;
+  }
+  
+  const vHeaders = violationsData[0];
+  const vMap = getHeaderMap(vHeaders);
+  
+  // Load Networks sheet for Network Name lookup
+  const networkNameMap = buildNetworkNameMap_();
+  
+  // Process each violation row and transform to V2 format
+  const v2Data = [V2_HEADERS];
+  
+  for (let i = 1; i < violationsData.length; i++) {
+    const row = violationsData[i];
+    const v2Row = transformToV2Row_(row, vMap, networkNameMap);
+    if (v2Row) v2Data.push(v2Row);
+  }
+  
+  // Write data to V2 sheet
+  if (v2Data.length > 1) {
+    v2Sheet.getRange(1, 1, v2Data.length, V2_HEADERS.length).setValues(v2Data);
+    
+    // Apply formatting
+    formatV2Sheet_(v2Sheet);
+    applyV2ConditionalFormatting_(v2Sheet);
+    
+    // Freeze header and priority columns
+    v2Sheet.setFrozenRows(1);
+    v2Sheet.setFrozenColumns(3);
+    
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    Logger.log(`[V2] ✅ Dashboard generated with ${v2Data.length - 1} rows in ${elapsed}s`);
+    
+    SpreadsheetApp.getUi().alert(`✅ V2 Dashboard generated!\n\n${v2Data.length - 1} violations processed\nTime: ${elapsed}s`);
+  } else {
+    SpreadsheetApp.getUi().alert("No violations to display in V2 dashboard.");
+  }
+}
+
+// ---------------------
+// TRANSFORM ROW TO V2 FORMAT
+// ---------------------
+function transformToV2Row_(row, vMap, networkNameMap) {
+  // Extract data from original Violations row
+  const networkId = String(row[vMap["Network ID"]] || "");
+  const networkName = networkNameMap[networkId] || networkId;
+  const advertiser = String(row[vMap["Advertiser"]] || "");
+  const placementId = String(row[vMap["Placement ID"]] || "");
+  const placementName = String(row[vMap["Placement"]] || "");
+  const placementStart = row[vMap["Placement Start Date"]];
+  const placementEnd = row[vMap["Placement End Date"]];
+  const reportDate = row[vMap["Report Date"]];
+  const impressions = row[vMap["Impressions"]] || 0;
+  const clicks = row[vMap["Clicks"]] || 0;
+  const ctrStr = String(row[vMap["CTR (%)"]] || "0%");
+  const ctr = parseFloat(ctrStr.replace("%", "")) || 0;
+  const cpcStr = String(row[vMap["$CPC"]] || "$0");
+  const cpc = parseFloat(cpcStr.replace("$", "")) || 0;
+  const cpmStr = String(row[vMap["$CPM"]] || "$0");
+  const cpm = parseFloat(cpmStr.replace("$", "")) || 0;
+  const issueType = String(row[vMap["Issue Type"]] || "");
+  const details = String(row[vMap["Details"]] || "");
+  const lastImpChange = row[vMap["Last Imp Change"]];
+  const lastClkChange = row[vMap["Last Click Change"]];
+  const ownerOps = String(row[vMap["Owner (Ops)"]] || "Unassigned");
+  
+  // Calculate derived fields
+  const flightDates = formatFlightDates_(placementStart, placementEnd, reportDate);
+  const issueCategory = extractIssueCategory_(issueType);
+  const issueSeverity = calculateSeverityScore_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate);
+  const priority = calculatePriority_(issueSeverity, issueCategory);
+  const status = calculateStatus_(priority, issueSeverity, issueCategory, cpc, placementEnd, reportDate);
+  const specificIssue = formatSpecificIssue_(issueType, details, impressions, clicks, cpc, cpm);
+  const daysStale = calculateDaysStale_(lastImpChange, lastClkChange, reportDate);
+  const atRisk = calculateFinancialImpact_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate);
+  
+  return [
+    priority,           // Priority (⭐⭐⭐ / ⭐⭐ / ⭐)
+    status,             // Status (🔴/🟡/🟢)
+    ownerOps,           // Owner (Ops)
+    networkId,          // Network ID
+    networkName,        // Network Name
+    advertiser,         // Advertiser
+    placementId,        // Placement ID
+    placementName,      // Placement Name
+    flightDates,        // Flight Dates (combined)
+    issueCategory,      // Issue Category
+    issueSeverity,      // Issue Severity (1-5)
+    specificIssue,      // Specific Issue
+    impressions,        // Impressions
+    clicks,             // Clicks
+    ctr + "%",          // CTR %
+    "$" + cpc.toFixed(2), // $CPC
+    "$" + cpm.toFixed(2), // $CPM
+    daysStale,          // Days Stale
+    "$" + atRisk.toFixed(2), // $ At Risk
+    ""                  // Action Required (blank for manual entry)
+  ];
+}
+
+// ---------------------
+// HELPER: Build Network Name Map
+// ---------------------
+function buildNetworkNameMap_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const networksSheet = ss.getSheetByName("Networks");
+  const map = {};
+  
+  if (!networksSheet || networksSheet.getLastRow() < 2) return map;
+  
+  const data = networksSheet.getDataRange().getValues();
+  const hdr = data[0].map(h => String(h || "").trim().toLowerCase());
+  
+  // Find Network ID and Network Name columns
+  const idCandidates = ["network id", "network_id", "networkid", "cm360 network id"];
+  const nameCandidates = ["network name", "network_name", "networkname", "cm360 network name", "name"];
+  
+  let idIdx = -1, nameIdx = -1;
+  
+  for (let i = 0; i < hdr.length; i++) {
+    const h = hdr[i];
+    if (idIdx === -1 && idCandidates.some(c => h.includes(c))) idIdx = i;
+    if (nameIdx === -1 && nameCandidates.some(c => h.includes(c))) nameIdx = i;
+  }
+  
+  if (idIdx === -1 || nameIdx === -1) return map;
+  
+  for (let i = 1; i < data.length; i++) {
+    const id = String(data[i][idIdx] || "").trim();
+    const name = String(data[i][nameIdx] || "").trim();
+    if (id && name) map[id] = name;
+  }
+  
+  Logger.log(`[V2] Loaded ${Object.keys(map).length} network names`);
+  return map;
+}
+
+// ---------------------
+// HELPER: Format Flight Dates
+// ---------------------
+function formatFlightDates_(startDate, endDate, reportDate) {
+  const start = startDate instanceof Date ? startDate : new Date(startDate);
+  const end = endDate instanceof Date ? endDate : new Date(endDate);
+  const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
+  
+  if (isNaN(end)) return "Unknown";
+  
+  const isExpired = end < report;
+  const startStr = isNaN(start) ? "?" : Utilities.formatDate(start, Session.getScriptTimeZone(), "M/d");
+  const endStr = Utilities.formatDate(end, Session.getScriptTimeZone(), "M/d");
+  
+  if (isExpired) {
+    return `ENDED ${endStr}`;
+  } else {
+    return `${startStr} - ${endStr}`;
+  }
+}
+
+// ---------------------
+// HELPER: Extract Issue Category
+// ---------------------
+function extractIssueCategory_(issueType) {
+  const types = issueType.toUpperCase();
+  if (types.includes("BILLING")) return "BILLING";
+  if (types.includes("DELIVERY")) return "DELIVERY";
+  if (types.includes("PERFORMANCE")) return "PERFORMANCE";
+  if (types.includes("COST")) return "COST";
+  return "OTHER";
+}
+
+// ---------------------
+// HELPER: Calculate Severity Score (1-5)
+// ---------------------
+function calculateSeverityScore_(issueType, imp, clk, cpc, cpm, placementEnd, reportDate) {
+  const types = issueType.toUpperCase();
+  const end = placementEnd instanceof Date ? placementEnd : new Date(placementEnd);
+  const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
+  const isExpired = !isNaN(end) && end < report;
+  
+  // 5 = CRITICAL: Billing risk with both metrics + clicks > impressions
+  if (types.includes("BILLING") && clk > imp && cpc > 0 && cpm > 0) return 5;
+  
+  // 5 = CRITICAL: Expired CPC risk with high cost
+  if (types.includes("EXPIRED CPC RISK") && cpc > 20) return 5;
+  
+  // 4 = HIGH: Active billing risk
+  if (types.includes("ACTIVE CPC") && clk > imp) return 4;
+  
+  // 4 = HIGH: Extreme performance (CTR ≥ 90% + CPM ≥ $10)
+  if (types.includes("PERFORMANCE") && cpm >= 10) return 4;
+  
+  // 3 = MEDIUM: Recently expired with activity
+  if (types.includes("RECENTLY EXPIRED") || (types.includes("DELIVERY") && isExpired)) return 3;
+  
+  // 3 = MEDIUM: High cost issues
+  if (types.includes("COST") && (cpc > 10 || cpm > 10)) return 3;
+  
+  // 2 = LOW: Cost-only issues
+  if (types.includes("COST")) return 2;
+  
+  // 1 = INFO: Everything else
+  return 1;
+}
+
+// ---------------------
+// HELPER: Calculate Priority
+// ---------------------
+function calculatePriority_(severity, category) {
+  if (severity >= 4) return "⭐⭐⭐";
+  if (severity === 3) return "⭐⭐";
+  return "⭐";
+}
+
+// ---------------------
+// HELPER: Calculate Status
+// ---------------------
+function calculateStatus_(priority, severity, category, cpc, placementEnd, reportDate) {
+  const end = placementEnd instanceof Date ? placementEnd : new Date(placementEnd);
+  const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
+  const isExpired = !isNaN(end) && end < report;
+  
+  // 🔴 URGENT: High priority + severe conditions
+  if (priority === "⭐⭐⭐" && (category === "BILLING" || cpc > 20 || (isExpired && severity >= 4))) {
+    return "🔴 URGENT";
+  }
+  
+  // 🟡 REVIEW: Medium priority or specific categories
+  if (priority === "⭐⭐" || category === "PERFORMANCE" || category === "DELIVERY") {
+    return "🟡 REVIEW";
+  }
+  
+  // 🟢 MONITOR: Everything else
+  return "🟢 MONITOR";
+}
+
+// ---------------------
+// HELPER: Format Specific Issue
+// ---------------------
+function formatSpecificIssue_(issueType, details, imp, clk, cpc, cpm) {
+  const types = issueType.split(", ");
+  const primary = types[0] || issueType;
+  
+  // Extract key details and format concisely
+  if (primary.includes("BILLING")) {
+    if (clk > imp) {
+      return `CPC Billing Risk: Clicks (${clk}) > Impr (${imp}), $CPC=$${cpc.toFixed(2)}`;
+    }
+  }
+  
+  if (primary.includes("PERFORMANCE")) {
+    const ctrMatch = details.match(/CTR = ([\d.]+)%/);
+    const ctr = ctrMatch ? ctrMatch[1] : "N/A";
+    return `Extreme Performance: CTR=${ctr}%, $CPM=$${cpm.toFixed(2)}`;
+  }
+  
+  if (primary.includes("DELIVERY")) {
+    const dateMatch = details.match(/Ended ([\d/]+)/);
+    const endDate = dateMatch ? dateMatch[1] : "Unknown";
+    return `Post-Flight Activity: Ended ${endDate}, still serving`;
+  }
+  
+  if (primary.includes("COST")) {
+    if (cpc > 10 && cpm === 0) {
+      return `High CPC Only: $CPC=$${cpc.toFixed(2)} (no CPM)`;
+    }
+    if (cpm > 10 && cpc === 0) {
+      return `High CPM Only: $CPM=$${cpm.toFixed(2)} (no CPC)`;
+    }
+    if (cpc > 10 && cpm > 10) {
+      return `Both Metrics High: $CPC=$${cpc.toFixed(2)}, $CPM=$${cpm.toFixed(2)}`;
+    }
+  }
+  
+  // Fallback: use first detail snippet
+  const detailParts = details.split(" | ");
+  return detailParts[0] || primary.replace(/🟥|🟨|🟩|🟦/g, "").trim();
+}
+
+// ---------------------
+// HELPER: Calculate Days Stale
+// ---------------------
+function calculateDaysStale_(lastImpChange, lastClkChange, reportDate) {
+  const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
+  
+  const impDays = (lastImpChange && !isNaN(lastImpChange)) ? lastImpChange : 999;
+  const clkDays = (lastClkChange && !isNaN(lastClkChange)) ? lastClkChange : 999;
+  
+  const stale = Math.max(impDays, clkDays);
+  
+  if (stale === 999) return "";
+  return stale;
+}
+
+// ---------------------
+// HELPER: Calculate Financial Impact ($ At Risk)
+// ---------------------
+function calculateFinancialImpact_(issueType, imp, clk, cpc, cpm, placementEnd, reportDate) {
+  const types = issueType.toUpperCase();
+  let atRisk = 0;
+  
+  // BILLING RISK: If clicks > impressions on CPC placement
+  if (types.includes("BILLING") && types.includes("CPC") && clk > imp && cpc > 0) {
+    // Potential overbilling = excess clicks × CPC
+    const excessClicks = clk - imp;
+    atRisk += excessClicks * cpc;
+  }
+  
+  // PERFORMANCE WASTE: Potential bot traffic (CTR ≥ 90% + high CPM)
+  if (types.includes("PERFORMANCE") && cpm >= 10) {
+    // Estimate 50% of impressions as potential waste
+    atRisk += (imp * 0.5) * (cpm / 1000);
+  }
+  
+  // POST-FLIGHT OVERSPEND: Spending after placement end date
+  const end = placementEnd instanceof Date ? placementEnd : new Date(placementEnd);
+  const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
+  if (types.includes("DELIVERY") && !isNaN(end) && end < report) {
+    // Estimate all current impressions are post-flight waste
+    if (cpm > 0) {
+      atRisk += (imp * cpm) / 1000;
+    } else if (cpc > 0) {
+      atRisk += clk * cpc;
+    }
+  }
+  
+  // HIGH COST: Flag but don't add to at-risk (already planned spend)
+  // Just monitoring, not financial risk
+  
+  return atRisk;
+}
+
+// ---------------------
+// FORMAT V2 SHEET
+// ---------------------
+function formatV2Sheet_(sheet) {
+  const headerRange = sheet.getRange(1, 1, 1, V2_HEADERS.length);
+  
+  // Header formatting
+  headerRange
+    .setBackground("#4a86e8")
+    .setFontColor("#ffffff")
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  
+  // Set column widths
+  sheet.setColumnWidth(1, 80);   // Priority
+  sheet.setColumnWidth(2, 100);  // Status
+  sheet.setColumnWidth(3, 120);  // Owner
+  sheet.setColumnWidth(4, 90);   // Network ID
+  sheet.setColumnWidth(5, 150);  // Network Name
+  sheet.setColumnWidth(6, 150);  // Advertiser
+  sheet.setColumnWidth(7, 100);  // Placement ID
+  sheet.setColumnWidth(8, 250);  // Placement Name
+  sheet.setColumnWidth(9, 120);  // Flight Dates
+  sheet.setColumnWidth(10, 100); // Issue Category
+  sheet.setColumnWidth(11, 90);  // Issue Severity
+  sheet.setColumnWidth(12, 350); // Specific Issue
+  sheet.setColumnWidth(13, 90);  // Impressions
+  sheet.setColumnWidth(14, 80);  // Clicks
+  sheet.setColumnWidth(15, 80);  // CTR %
+  sheet.setColumnWidth(16, 80);  // $CPC
+  sheet.setColumnWidth(17, 80);  // $CPM
+  sheet.setColumnWidth(18, 90);  // Days Stale
+  sheet.setColumnWidth(19, 100); // $ At Risk
+  sheet.setColumnWidth(20, 150); // Action Required
+  
+  // Auto-resize row heights
+  sheet.setRowHeights(2, sheet.getMaxRows() - 1, 21);
+  
+  Logger.log("[V2] Sheet formatting applied");
+}
+
+// ---------------------
+// APPLY CONDITIONAL FORMATTING
+// ---------------------
+function applyV2ConditionalFormatting_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  
+  // Priority column (A) - Background colors
+  const priorityRules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo("⭐⭐⭐")
+      .setBackground(V2_COLORS.PRIORITY_HIGH)
+      .setRanges([sheet.getRange(2, 1, lastRow - 1, 1)])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo("⭐⭐")
+      .setBackground(V2_COLORS.PRIORITY_MED)
+      .setRanges([sheet.getRange(2, 1, lastRow - 1, 1)])
+      .build()
+  ];
+  
+  // Status column (B) - Background + text colors
+  const statusRules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains("🔴 URGENT")
+      .setBackground(V2_COLORS.URGENT_BG)
+      .setFontColor(V2_COLORS.URGENT_TEXT)
+      .setRanges([sheet.getRange(2, 2, lastRow - 1, 1)])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains("🟡 REVIEW")
+      .setBackground(V2_COLORS.REVIEW_BG)
+      .setFontColor(V2_COLORS.REVIEW_TEXT)
+      .setRanges([sheet.getRange(2, 2, lastRow - 1, 1)])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains("🟢 MONITOR")
+      .setBackground(V2_COLORS.MONITOR_BG)
+      .setFontColor(V2_COLORS.MONITOR_TEXT)
+      .setRanges([sheet.getRange(2, 2, lastRow - 1, 1)])
+      .build()
+  ];
+  
+  // Days Stale column (R/18) - Color gradient
+  const staleRules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThanOrEqualTo(15)
+      .setBackground(V2_COLORS.STALE_SEVERE)
+      .setRanges([sheet.getRange(2, 18, lastRow - 1, 1)])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberBetween(8, 14)
+      .setBackground(V2_COLORS.STALE_HIGH)
+      .setRanges([sheet.getRange(2, 18, lastRow - 1, 1)])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberBetween(4, 7)
+      .setBackground(V2_COLORS.STALE_MED)
+      .setRanges([sheet.getRange(2, 18, lastRow - 1, 1)])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberBetween(0, 3)
+      .setBackground(V2_COLORS.STALE_LOW)
+      .setRanges([sheet.getRange(2, 18, lastRow - 1, 1)])
+      .build()
+  ];
+  
+  // Flight Dates column (I/9) - Highlight expired
+  const flightRules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains("ENDED")
+      .setFontColor("#cc0000")
+      .setBold(true)
+      .setRanges([sheet.getRange(2, 9, lastRow - 1, 1)])
+      .build()
+  ];
+  
+  // Combine all rules
+  const allRules = [].concat(priorityRules, statusRules, staleRules, flightRules);
+  sheet.setConditionalFormatRules(allRules);
+  
+  Logger.log(`[V2] Applied ${allRules.length} conditional formatting rules`);
+}
+
+// ---------------------
+// EXPORT V2 TO GOOGLE DRIVE
+// ---------------------
+function exportV2ToDrive() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const v2Sheet = ss.getSheetByName(V2_SHEET_NAME);
+  
+  if (!v2Sheet || v2Sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert("Error: V2 Dashboard is empty. Generate it first.");
+    return;
+  }
+  
+  try {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const monthName = Utilities.formatDate(today, Session.getScriptTimeZone(), "MMMM");
+    
+    // Create folder structure: YYYY-MM-MonthName
+    const parentFolder = DriveApp.getFolderById(V2_DRIVE_FOLDER_ID);
+    const monthFolderName = `${year}-${month}-${monthName}`;
+    
+    let monthFolder;
+    const existingFolders = parentFolder.getFoldersByName(monthFolderName);
+    if (existingFolders.hasNext()) {
+      monthFolder = existingFolders.next();
+    } else {
+      monthFolder = parentFolder.createFolder(monthFolderName);
+      Logger.log(`[V2] Created folder: ${monthFolderName}`);
+    }
+    
+    // Export as XLSX
+    const fileName = `Violations_V2_${year}-${month}-${day}.xlsx`;
+    const xlsxBlob = createXLSXFromSheet(v2Sheet);
+    xlsxBlob.setName(fileName);
+    
+    // Delete old file with same name if exists
+    const existingFiles = monthFolder.getFilesByName(fileName);
+    while (existingFiles.hasNext()) {
+      existingFiles.next().setTrashed(true);
+    }
+    
+    // Create new file
+    const file = monthFolder.createFile(xlsxBlob);
+    const fileUrl = file.getUrl();
+    
+    Logger.log(`[V2] ✅ Exported to Drive: ${fileUrl}`);
+    SpreadsheetApp.getUi().alert(`✅ V2 Dashboard exported to Google Drive!\n\nFile: ${fileName}\nFolder: ${monthFolderName}\n\nURL: ${fileUrl}`);
+    
+    return fileUrl;
+    
+  } catch (error) {
+    Logger.log("[V2] ❌ Export failed: " + error);
+    SpreadsheetApp.getUi().alert("❌ Export failed:\n\n" + error);
+    return null;
+  }
+}
+
+// ---------------------
+// MONTHLY SUMMARY REPORT
+// ---------------------
+function generateMonthlySummaryReport() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const v2Sheet = ss.getSheetByName(V2_SHEET_NAME);
+  
+  if (!v2Sheet || v2Sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert("Error: V2 Dashboard is empty. Generate it first.");
+    return;
+  }
+  
+  const data = v2Sheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+  
+  // Build header map
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[h] = i; });
+  
+  // Calculate statistics
+  let totalViolations = rows.length;
+  let urgentCount = 0;
+  let reviewCount = 0;
+  let monitorCount = 0;
+  let totalAtRisk = 0;
+  
+  const categoryBreakdown = {};
+  const ownerBreakdown = {};
+  const severityBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  
+  rows.forEach(row => {
+    const status = String(row[hMap["Status"]] || "");
+    const category = String(row[hMap["Issue Category"]] || "OTHER");
+    const owner = String(row[hMap["Owner (Ops)"]] || "Unassigned");
+    const severity = row[hMap["Issue Severity"]] || 1;
+    const atRiskStr = String(row[hMap["$ At Risk"]] || "$0");
+    const atRisk = parseFloat(atRiskStr.replace("$", "")) || 0;
+    
+    if (status.includes("🔴")) urgentCount++;
+    else if (status.includes("🟡")) reviewCount++;
+    else if (status.includes("🟢")) monitorCount++;
+    
+    totalAtRisk += atRisk;
+    
+    categoryBreakdown[category] = (categoryBreakdown[category] || 0) + 1;
+    ownerBreakdown[owner] = (ownerBreakdown[owner] || 0) + 1;
+    severityBreakdown[severity] = (severityBreakdown[severity] || 0) + 1;
+  });
+  
+  // Create summary sheet
+  let summarySheet = ss.getSheetByName("Monthly Summary");
+  if (summarySheet) {
+    summarySheet.clear();
+  } else {
+    summarySheet = ss.insertSheet("Monthly Summary");
+  }
+  
+  const today = new Date();
+  const monthName = Utilities.formatDate(today, Session.getScriptTimeZone(), "MMMM yyyy");
+  
+  // Build summary data
+  const summaryData = [
+    ["CM360 QA Monthly Summary Report"],
+    ["Generated:", Utilities.formatDate(today, Session.getScriptTimeZone(), "MMMM dd, yyyy HH:mm")],
+    ["Month:", monthName],
+    [""],
+    ["📊 OVERVIEW"],
+    ["Total Violations:", totalViolations],
+    ["🔴 Urgent:", urgentCount],
+    ["🟡 Review:", reviewCount],
+    ["🟢 Monitor:", monitorCount],
+    ["💰 Total $ At Risk:", "$" + totalAtRisk.toFixed(2)],
+    [""],
+    ["📂 BY CATEGORY"],
+  ];
+  
+  Object.keys(categoryBreakdown).sort().forEach(cat => {
+    summaryData.push([cat, categoryBreakdown[cat]]);
+  });
+  
+  summaryData.push([""]);
+  summaryData.push(["👥 BY OWNER"]);
+  
+  Object.keys(ownerBreakdown).sort().forEach(owner => {
+    summaryData.push([owner, ownerBreakdown[owner]]);
+  });
+  
+  summaryData.push([""]);
+  summaryData.push(["⚡ BY SEVERITY"]);
+  for (let i = 5; i >= 1; i--) {
+    const stars = i >= 4 ? "⭐⭐⭐" : i === 3 ? "⭐⭐" : "⭐";
+    summaryData.push([`${i} - ${stars}`, severityBreakdown[i]]);
+  }
+  
+  // Write to sheet
+  summarySheet.getRange(1, 1, summaryData.length, 2).setValues(summaryData);
+  
+  // Format
+  summarySheet.getRange(1, 1, 1, 2).merge().setBackground("#4a86e8").setFontColor("#ffffff").setFontWeight("bold").setFontSize(14);
+  summarySheet.setColumnWidth(1, 200);
+  summarySheet.setColumnWidth(2, 150);
+  
+  Logger.log("[V2] ✅ Monthly summary generated");
+  SpreadsheetApp.getUi().alert(`✅ Monthly Summary Report Generated!\n\nTotal Violations: ${totalViolations}\n🔴 Urgent: ${urgentCount}\n💰 At Risk: $${totalAtRisk.toFixed(2)}`);
+}
+
+// ---------------------
+// MONTH-OVER-MONTH ANALYSIS
+// ---------------------
+function runMonthOverMonthAnalysis() {
+  SpreadsheetApp.getUi().alert("📈 Month-over-Month Analysis\n\nThis feature tracks trends by comparing archived monthly reports.\n\nComing soon: Automatically compare violation counts, $ at risk, and resolution rates across months.");
+  
+  // TODO: Implement full MoM analysis
+  // - Load previous month's archived V2 file from Drive
+  // - Compare violation counts by category
+  // - Track $ at risk trends
+  // - Calculate resolution rate (violations disappeared)
+  // - Generate trend charts
+}
+
+// ---------------------
+// DISPLAY FINANCIAL IMPACT
+// ---------------------
+function displayFinancialImpact() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const v2Sheet = ss.getSheetByName(V2_SHEET_NAME);
+  
+  if (!v2Sheet || v2Sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert("Error: V2 Dashboard is empty. Generate it first.");
+    return;
+  }
+  
+  const data = v2Sheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+  
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[h] = i; });
+  
+  let totalAtRisk = 0;
+  let billingRisk = 0;
+  let performanceWaste = 0;
+  let postFlightSpend = 0;
+  
+  rows.forEach(row => {
+    const category = String(row[hMap["Issue Category"]] || "");
+    const atRiskStr = String(row[hMap["$ At Risk"]] || "$0");
+    const atRisk = parseFloat(atRiskStr.replace("$", "")) || 0;
+    
+    totalAtRisk += atRisk;
+    
+    if (category === "BILLING") billingRisk += atRisk;
+    if (category === "PERFORMANCE") performanceWaste += atRisk;
+    if (category === "DELIVERY") postFlightSpend += atRisk;
+  });
+  
+  const message = `💰 FINANCIAL IMPACT ANALYSIS\n\n` +
+    `Total $ At Risk: $${totalAtRisk.toFixed(2)}\n\n` +
+    `Breakdown:\n` +
+    `  • Billing Risk: $${billingRisk.toFixed(2)}\n` +
+    `  • Performance Waste: $${performanceWaste.toFixed(2)}\n` +
+    `  • Post-Flight Spend: $${postFlightSpend.toFixed(2)}\n\n` +
+    `This represents potential savings from catching and resolving these violations.`;
+  
+  SpreadsheetApp.getUi().alert(message);
+  Logger.log(`[V2] Financial Impact - Total: $${totalAtRisk.toFixed(2)}`);
+}
+
+// =====================================================================================================================
+// ============================================ END V2 DASHBOARD SYSTEM ================================================
+// =====================================================================================================================
+
