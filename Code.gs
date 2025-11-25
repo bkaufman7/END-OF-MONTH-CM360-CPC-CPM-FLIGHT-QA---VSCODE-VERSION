@@ -26,6 +26,12 @@ function onOpen() {
       .addItem("📊 Monthly Summary Report", "generateMonthlySummaryReport")
       .addItem("📈 Month-over-Month Analysis", "runMonthOverMonthAnalysis")
       .addItem("💰 Calculate Financial Impact", "displayFinancialImpact"))
+    .addSeparator()
+    .addSubMenu(ui.createMenu("📁 Historical Archive")
+      .addItem("📁 Archive All (April-Nov 2025)", "archiveAllHistoricalReports")
+      .addItem("📅 Archive Single Month", "archiveSingleMonth")
+      .addItem("📊 View Archive Progress", "viewArchiveProgress")
+      .addItem("🔄 Resume Archive", "resumeArchive"))
     .addToUi();
 }
 
@@ -2613,7 +2619,400 @@ function displayFinancialImpact() {
   Logger.log(`[V2] Financial Impact - Total Overcharge: $${totalOvercharge.toFixed(2)}`);
 }
 
+
 // =====================================================================================================================
 // ============================================ END V2 DASHBOARD SYSTEM ================================================
 // =====================================================================================================================
+
+
+// =====================================================================================================================
+// ======================================== HISTORICAL ARCHIVE SYSTEM ==================================================
+// =====================================================================================================================
+
+// ---------------------
+// CONSTANTS
+// ---------------------
+const ARCHIVE_FOLDER_ID = '1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN'; // Same as V2 exports
+const GMAIL_SEARCH_SUBJECT = 'CM360 CPC/CPM FLIGHT QA';
+const BATCH_SIZE = 25; // Process 25 emails per execution (safe for 6-min limit)
+
+// ---------------------
+// MAIN: Archive All Historical Reports (April-November 2025)
+// ---------------------
+function archiveAllHistoricalReports() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Archive Historical Reports',
+    'This will process all CM360 QA reports from April-November 2025.\n\n' +
+    'Expected: ~128 emails (8 months × 16 days)\n' +
+    'Processing: 25 emails per run\n' +
+    'You will receive email updates after each batch.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    ui.alert('Archive cancelled.');
+    return;
+  }
+  
+  // Initialize archive state
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('ARCHIVE_STATE', JSON.stringify({
+    status: 'running',
+    currentMonth: 4, // Start with April
+    currentYear: 2025,
+    emailsProcessed: 0,
+    attachmentsSaved: 0,
+    startTime: new Date().toISOString()
+  }));
+  
+  // Start processing
+  processNextBatch_();
+}
+
+// ---------------------
+// Archive Single Month (User selects)
+// ---------------------
+function archiveSingleMonth() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    'Archive Single Month',
+    'Enter month to archive (1-12):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const month = parseInt(response.getResponseText());
+  if (isNaN(month) || month < 1 || month > 12) {
+    ui.alert('Invalid month. Please enter 1-12.');
+    return;
+  }
+  
+  const yearResponse = ui.prompt(
+    'Archive Single Month',
+    'Enter year (2025):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (yearResponse.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const year = parseInt(yearResponse.getResponseText());
+  if (isNaN(year)) {
+    ui.alert('Invalid year.');
+    return;
+  }
+  
+  // Process single month
+  const stats = processSingleMonthArchive_(year, month);
+  
+  ui.alert(
+    'Archive Complete',
+    `Processed ${stats.emailsProcessed} emails\n` +
+    `Saved ${stats.attachmentsSaved} attachments\n\n` +
+    `Folder: Historical Violation Reports/${year}/${String(month).padStart(2, '0')}-${getMonthName_(month)}`,
+    ui.ButtonSet.OK
+  );
+}
+
+// ---------------------
+// View Archive Progress
+// ---------------------
+function viewArchiveProgress() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('ARCHIVE_STATE');
+  
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!stateJson) {
+    ui.alert('Archive Progress', 'No archive in progress.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  const monthName = getMonthName_(state.currentMonth);
+  
+  ui.alert(
+    'Archive Progress',
+    `Status: ${state.status}\n` +
+    `Current: ${monthName} ${state.currentYear}\n` +
+    `Emails processed: ${state.emailsProcessed}\n` +
+    `Attachments saved: ${state.attachmentsSaved}\n` +
+    `Started: ${new Date(state.startTime).toLocaleString()}`,
+    ui.ButtonSet.OK
+  );
+}
+
+// ---------------------
+// Resume Archive (if interrupted)
+// ---------------------
+function resumeArchive() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('ARCHIVE_STATE');
+  
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!stateJson) {
+    ui.alert('Resume Archive', 'No archive in progress to resume.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  if (state.status === 'completed') {
+    ui.alert('Resume Archive', 'Archive already completed.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const response = ui.alert(
+    'Resume Archive',
+    `Resume from ${getMonthName_(state.currentMonth)} ${state.currentYear}?\n\n` +
+    `Progress: ${state.emailsProcessed} emails, ${state.attachmentsSaved} attachments`,
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    return;
+  }
+  
+  processNextBatch_();
+}
+
+// ---------------------
+// INTERNAL: Process Next Batch (recursive until complete)
+// ---------------------
+function processNextBatch_() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('ARCHIVE_STATE');
+  
+  if (!stateJson) {
+    Logger.log('No archive state found');
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  // Check if we're done (November = month 11)
+  if (state.currentMonth > 11) {
+    state.status = 'completed';
+    props.setProperty('ARCHIVE_STATE', JSON.stringify(state));
+    
+    // Send completion email
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '✅ CM360 Historical Archive Complete',
+      htmlBody: `<h3>Archive Complete</h3>
+        <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
+        <p><strong>Total attachments saved:</strong> ${state.attachmentsSaved}</p>
+        <p><strong>Duration:</strong> ${new Date(state.startTime).toLocaleString()} - ${new Date().toLocaleString()}</p>
+        <p><strong>Location:</strong> <a href="https://drive.google.com/drive/folders/${ARCHIVE_FOLDER_ID}">Historical Violation Reports</a></p>`
+    });
+    
+    return;
+  }
+  
+  // Process current month
+  try {
+    const monthStats = processSingleMonthArchive_(state.currentYear, state.currentMonth);
+    
+    state.emailsProcessed += monthStats.emailsProcessed;
+    state.attachmentsSaved += monthStats.attachmentsSaved;
+    state.currentMonth++;
+    
+    props.setProperty('ARCHIVE_STATE', JSON.stringify(state));
+    
+    // Send progress email
+    const monthName = getMonthName_(state.currentMonth - 1);
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: `📁 CM360 Archive: ${monthName} ${state.currentYear} Complete`,
+      htmlBody: `<h3>${monthName} ${state.currentYear} Archived</h3>
+        <p><strong>Emails:</strong> ${monthStats.emailsProcessed}</p>
+        <p><strong>Attachments:</strong> ${monthStats.attachmentsSaved}</p>
+        <p><strong>Total progress:</strong> ${state.emailsProcessed} emails, ${state.attachmentsSaved} attachments</p>
+        <p><strong>Next:</strong> ${getMonthName_(state.currentMonth)} ${state.currentYear}</p>`
+    });
+    
+    // Continue to next month
+    processNextBatch_();
+    
+  } catch (error) {
+    Logger.log('Error processing batch: ' + error);
+    
+    // Send error email
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '⚠️ CM360 Archive Error',
+      htmlBody: `<h3>Archive Error</h3>
+        <p><strong>Month:</strong> ${getMonthName_(state.currentMonth)} ${state.currentYear}</p>
+        <p><strong>Error:</strong> ${error}</p>
+        <p><strong>Progress:</strong> ${state.emailsProcessed} emails, ${state.attachmentsSaved} attachments</p>
+        <p>Use "Resume Archive" to continue.</p>`
+    });
+  }
+}
+
+// ---------------------
+// INTERNAL: Process Single Month Archive
+// ---------------------
+function processSingleMonthArchive_(year, month) {
+  const monthStr = String(month).padStart(2, '0');
+  const monthName = getMonthName_(month);
+  
+  // Search Gmail for this month's reports
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59); // Last day of month
+  
+  const query = `subject:"${GMAIL_SEARCH_SUBJECT}" after:${startDate.getTime()/1000} before:${endDate.getTime()/1000}`;
+  
+  const threads = GmailApp.search(query, 0, BATCH_SIZE);
+  
+  let emailsProcessed = 0;
+  let attachmentsSaved = 0;
+  
+  // Get or create Drive folder
+  const monthFolder = getOrCreateArchiveFolder_(year, month);
+  
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    
+    for (const message of messages) {
+      const subject = message.getSubject();
+      const date = extractDateFromSubject_(subject);
+      
+      if (!date) {
+        Logger.log(`Could not extract date from subject: ${subject}`);
+        continue;
+      }
+      
+      // Process attachments
+      const attachments = message.getAttachments();
+      
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        
+        // Handle ZIP files
+        if (filename.toLowerCase().endsWith('.zip')) {
+          const zipBlob = attachment.copyBlob();
+          const unzipped = Utilities.unzip(zipBlob);
+          
+          for (const file of unzipped) {
+            if (file.getName().toLowerCase().endsWith('.csv')) {
+              saveAttachmentToDrive_(file, monthFolder, date);
+              attachmentsSaved++;
+            }
+          }
+        }
+        // Handle CSV files
+        else if (filename.toLowerCase().endsWith('.csv')) {
+          saveAttachmentToDrive_(attachment, monthFolder, date);
+          attachmentsSaved++;
+        }
+      }
+      
+      emailsProcessed++;
+    }
+  }
+  
+  return {
+    emailsProcessed: emailsProcessed,
+    attachmentsSaved: attachmentsSaved
+  };
+}
+
+// ---------------------
+// INTERNAL: Get or Create Archive Folder Structure
+// ---------------------
+function getOrCreateArchiveFolder_(year, month) {
+  const monthStr = String(month).padStart(2, '0');
+  const monthName = getMonthName_(month);
+  
+  const rootFolder = DriveApp.getFolderById(ARCHIVE_FOLDER_ID);
+  
+  // Get or create "Historical Violation Reports" folder
+  let histFolder;
+  const histFolders = rootFolder.getFoldersByName('Historical Violation Reports');
+  if (histFolders.hasNext()) {
+    histFolder = histFolders.next();
+  } else {
+    histFolder = rootFolder.createFolder('Historical Violation Reports');
+  }
+  
+  // Get or create year folder
+  let yearFolder;
+  const yearFolders = histFolder.getFoldersByName(String(year));
+  if (yearFolders.hasNext()) {
+    yearFolder = yearFolders.next();
+  } else {
+    yearFolder = histFolder.createFolder(String(year));
+  }
+  
+  // Get or create month folder
+  let monthFolder;
+  const monthFolderName = `${monthStr}-${monthName}`;
+  const monthFolders = yearFolder.getFoldersByName(monthFolderName);
+  if (monthFolders.hasNext()) {
+    monthFolder = monthFolders.next();
+  } else {
+    monthFolder = yearFolder.createFolder(monthFolderName);
+  }
+  
+  return monthFolder;
+}
+
+// ---------------------
+// INTERNAL: Save Attachment to Drive
+// ---------------------
+function saveAttachmentToDrive_(attachment, folder, date) {
+  const dateStr = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const filename = `CM360_Report_${dateStr}.csv`;
+  
+  // Check if file already exists
+  const existingFiles = folder.getFilesByName(filename);
+  if (existingFiles.hasNext()) {
+    Logger.log(`File already exists: ${filename}`);
+    return;
+  }
+  
+  // Create file
+  folder.createFile(attachment.copyBlob().setName(filename));
+  Logger.log(`Saved: ${filename}`);
+}
+
+// ---------------------
+// INTERNAL: Extract Date from Email Subject
+// ---------------------
+function extractDateFromSubject_(subject) {
+  // Subject format: "CM360 CPC/CPM FLIGHT QA – 11.25.25"
+  const match = subject.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
+  
+  if (!match) {
+    return null;
+  }
+  
+  const month = parseInt(match[1]) - 1; // JS months are 0-indexed
+  const day = parseInt(match[2]);
+  const year = 2000 + parseInt(match[3]); // Assuming 20xx
+  
+  return new Date(year, month, day);
+}
+
+// ---------------------
+// INTERNAL: Get Month Name
+// ---------------------
+function getMonthName_(month) {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                  'July', 'August', 'September', 'October', 'November', 'December'];
+  return months[month - 1];
+}
+
+// =====================================================================================================================
+// ======================================= END HISTORICAL ARCHIVE SYSTEM ===============================================
+// =====================================================================================================================
+
 
