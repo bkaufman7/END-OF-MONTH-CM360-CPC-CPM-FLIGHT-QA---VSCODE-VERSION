@@ -2895,21 +2895,23 @@ function processSingleMonthArchive_(year, month) {
       
       for (const attachment of attachments) {
         const filename = attachment.getName();
+        const lowerFilename = filename.toLowerCase();
         
         // Handle ZIP files
-        if (filename.toLowerCase().endsWith('.zip')) {
+        if (lowerFilename.endsWith('.zip')) {
           const zipBlob = attachment.copyBlob();
           const unzipped = Utilities.unzip(zipBlob);
           
           for (const file of unzipped) {
-            if (file.getName().toLowerCase().endsWith('.csv')) {
+            const unzippedName = file.getName().toLowerCase();
+            if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
               saveAttachmentToDrive_(file, monthFolder, date);
               attachmentsSaved++;
             }
           }
         }
-        // Handle CSV files
-        else if (filename.toLowerCase().endsWith('.csv')) {
+        // Handle CSV and XLSX files
+        else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
           saveAttachmentToDrive_(attachment, monthFolder, date);
           attachmentsSaved++;
         }
@@ -2970,7 +2972,9 @@ function getOrCreateArchiveFolder_(year, month) {
 // ---------------------
 function saveAttachmentToDrive_(attachment, folder, date) {
   const dateStr = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const filename = `CM360_Report_${dateStr}.csv`;
+  const originalName = attachment.getName();
+  const extension = originalName.substring(originalName.lastIndexOf('.'));
+  const filename = `CM360_Report_${dateStr}${extension}`;
   
   // Check if file already exists
   const existingFiles = folder.getFilesByName(filename);
