@@ -1865,7 +1865,11 @@ function transformToV2Row_(row, vMap, networkNameMap) {
   // Calculate derived fields
   const flightDates = formatFlightDates_(placementStart, placementEnd, reportDate);
   const issueCategory = extractIssueCategory_(issueType);
-  const issueSeverity = calculateSeverityScore_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate);
+  
+  // Check if this is a click tracker/pixel (de-escalate if 0 impressions)
+  const isTracker = isClickTrackerOrPixel_(placementName);
+  
+  const issueSeverity = calculateSeverityScore_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate, isTracker);
   const priority = calculatePriority_(issueSeverity, issueCategory);
   const status = calculateStatus_(priority, issueSeverity, issueCategory, cpc, placementEnd, reportDate);
   const specificIssue = formatSpecificIssue_(issueType, details, impressions, clicks, cpc, cpm);
@@ -2036,6 +2040,31 @@ function formatFlightDates_(startDate, endDate, reportDate) {
 }
 
 // ---------------------
+// HELPER: Detect Click Tracker/Impression Pixel
+// ---------------------
+function isClickTrackerOrPixel_(placementName) {
+  if (!placementName) return false;
+  
+  const name = normalizeName_(placementName);
+  
+  // Compile patterns if needed
+  compileLPPatternsIfNeeded_();
+  
+  // Check for click tracker or impression pixel patterns
+  for (let i = 0; i < _lpCompiled.length; i++) {
+    const p = _lpCompiled[i];
+    if (!p.enabled || !p.re) continue;
+    
+    const cat = p.category;
+    if ((cat === 'Click Tracker' || cat === 'Impression Pixel/Beacon') && p.re.test(name)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// ---------------------
 // HELPER: Extract Issue Category
 // ---------------------
 function extractIssueCategory_(issueType) {
@@ -2050,11 +2079,18 @@ function extractIssueCategory_(issueType) {
 // ---------------------
 // HELPER: Calculate Severity Score (1-5)
 // ---------------------
-function calculateSeverityScore_(issueType, imp, clk, cpc, cpm, placementEnd, reportDate) {
+function calculateSeverityScore_(issueType, imp, clk, cpc, cpm, placementEnd, reportDate, isTracker) {
   const types = issueType.toUpperCase();
   const end = placementEnd instanceof Date ? placementEnd : new Date(placementEnd);
   const report = reportDate instanceof Date ? reportDate : new Date(reportDate);
   const isExpired = !isNaN(end) && end < report;
+  
+  // De-escalate click trackers/pixels with 0 impressions
+  if (isTracker && imp === 0) {
+    // Click trackers with 0 impressions are expected behavior
+    // Downgrade to severity 1 (INFO) regardless of issue type
+    return 1;
+  }
   
   // 5 = CRITICAL: Billing risk with both metrics + clicks > impressions
   if (types.includes("BILLING") && clk > imp && cpc > 0 && cpm > 0) return 5;
