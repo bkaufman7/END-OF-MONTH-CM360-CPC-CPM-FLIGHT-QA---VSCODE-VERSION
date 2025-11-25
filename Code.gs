@@ -145,6 +145,10 @@ const QA_CHUNK_ROWS = 3500;
 const QA_TIME_BUDGET_MS = 4.2 * 60 * 1000;
 const QA_STATE_KEY = 'qa_progress_v2';      // DocumentProperties key
 
+// ====== Cost calculation rates ======
+const CPC_RATE = 0.008;  // Cost per click ($8 per 1000 clicks)
+const CPM_RATE = 0.034;  // Cost per 1000 impressions ($0.034 per 1000 impressions)
+
 // --- Auto-resume trigger control for QA chunks ---
 const QA_TRIGGER_KEY = 'qa_chunk_trigger_id';   // ScriptProperties key for one-shot trigger
 const QA_LOCK_KEY = 'qa_chunk_lock';            // logical name only
@@ -1757,12 +1761,12 @@ const V2_COLORS = {
   STALE_LOW: "#d9ead3"       // Light green
 };
 
-// V2 Headers (22 columns - includes billing breakdown)
+// V2 Headers (21 columns - includes billing breakdown)
 const V2_HEADERS = [
   "Priority", "Status", "Owner (Ops)", "Network ID", "Network Name", "Advertiser",
   "Placement ID", "Placement Name", "Flight Dates", "Issue Category", "Issue Severity",
-  "Specific Issue", "Impressions", "Clicks", "CTR %", "$CPC", "$CPM",
-  "Days Stale", "Expected Cost", "Actual Cost", "Overcharge", "Action Required"
+  "Specific Issue", "Impressions", "Clicks", "CTR %", "CPC Cost", "CPM Cost",
+  "Days Stale", "Total Cost", "Overcharge", "Action Required"
 ];
 
 // ---------------------
@@ -1867,9 +1871,24 @@ function transformToV2Row_(row, vMap, networkNameMap) {
   const specificIssue = formatSpecificIssue_(issueType, details, impressions, clicks, cpc, cpm);
   const daysStale = calculateDaysStale_(lastImpChange, lastClkChange, reportDate);
   
-  // Calculate billing costs using Google's dual methodology
-  const billingCalc = calculateGoogleBilling_(impressions, clicks, cpc, cpm);
-  const atRisk = calculateFinancialImpact_(issueType, impressions, clicks, cpc, cpm, placementEnd, reportDate, billingCalc);
+  // Calculate billing costs using correct CPC/CPM rates
+  const cpcCost = clicks * CPC_RATE;
+  const cpmCost = (impressions / 1000) * CPM_RATE;
+  
+  // Total cost and overcharge calculation
+  let totalCost = 0;
+  let overcharge = 0;
+  
+  if (clicks > impressions) {
+    // Billing error: Billed at CPM for impressions + CPC for excess clicks
+    const excessClicks = clicks - impressions;
+    overcharge = excessClicks * CPC_RATE;
+    totalCost = cpmCost + overcharge;
+  } else {
+    // Normal: Billed at CPM only
+    totalCost = cpmCost;
+    overcharge = 0;
+  }
   
   return [
     priority,           // Priority (⭐⭐⭐ / ⭐⭐ / ⭐)
@@ -1887,12 +1906,11 @@ function transformToV2Row_(row, vMap, networkNameMap) {
     impressions,        // Impressions
     clicks,             // Clicks
     ctr + "%",          // CTR %
-    "$" + cpc.toFixed(2), // $CPC
-    "$" + cpm.toFixed(2), // $CPM
+    "$" + cpcCost.toFixed(2), // CPC Cost (total)
+    "$" + cpmCost.toFixed(2), // CPM Cost (total)
     daysStale,          // Days Stale
-    "$" + billingCalc.expectedCost.toFixed(2), // Expected Cost
-    "$" + billingCalc.actualCost.toFixed(2),   // Actual Cost
-    "$" + billingCalc.overcharge.toFixed(2),   // Overcharge
+    "$" + totalCost.toFixed(2),   // Total Cost (actual bill)
+    "$" + overcharge.toFixed(2),  // Overcharge (extra due to error)
     ""                  // Action Required (blank for manual entry)
   ];
 }
@@ -2221,13 +2239,12 @@ function formatV2Sheet_(sheet) {
   sheet.setColumnWidth(13, 90);  // Impressions
   sheet.setColumnWidth(14, 80);  // Clicks
   sheet.setColumnWidth(15, 80);  // CTR %
-  sheet.setColumnWidth(16, 80);  // $CPC
-  sheet.setColumnWidth(17, 80);  // $CPM
+  sheet.setColumnWidth(16, 100); // CPC Cost
+  sheet.setColumnWidth(17, 100); // CPM Cost
   sheet.setColumnWidth(18, 90);  // Days Stale
-  sheet.setColumnWidth(19, 110); // Expected Cost
-  sheet.setColumnWidth(20, 110); // Actual Cost
-  sheet.setColumnWidth(21, 110); // Overcharge
-  sheet.setColumnWidth(22, 150); // Action Required
+  sheet.setColumnWidth(19, 110); // Total Cost
+  sheet.setColumnWidth(20, 110); // Overcharge
+  sheet.setColumnWidth(21, 150); // Action Required
   
   // Auto-resize row heights
   sheet.setRowHeights(2, sheet.getMaxRows() - 1, 21);
@@ -2312,13 +2329,13 @@ function applyV2ConditionalFormatting_(sheet) {
       .build()
   ];
   
-  // Overcharge column (U/21) - Highlight any overcharges > $0
+  // Overcharge column (T/20) - Highlight any overcharges > $0
   const overchargeRules = [
     SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=VALUE(SUBSTITUTE(U2,"$",""))>0')
+      .whenFormulaSatisfied('=VALUE(SUBSTITUTE(T2,"$",""))>0')
       .setBackground("#f4cccc")  // Light red
       .setBold(true)
-      .setRanges([sheet.getRange(2, 21, lastRow - 1, 1)])
+      .setRanges([sheet.getRange(2, 20, lastRow - 1, 1)])
       .build()
   ];
   
