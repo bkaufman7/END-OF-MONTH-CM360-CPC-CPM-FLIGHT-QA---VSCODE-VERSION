@@ -37,6 +37,7 @@ function onOpen() {
       .addItem("📦 Archive All Raw Data (Apr-Nov 2025)", "archiveAllRawData")
       .addItem("📊 View Raw Data Progress", "viewRawDataProgress")
       .addItem("🔄 Resume Raw Data Archive", "resumeRawDataArchive")
+      .addItem("🔄 Reset & Restart from April", "resetRawDataArchive")
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger", "createRawDataAutoResumeTrigger")
       .addItem("🛑 Delete Auto-Resume Trigger", "deleteRawDataAutoResumeTrigger")
@@ -3063,8 +3064,10 @@ function archiveAllRawData() {
     'This will save ALL raw data files from April-November 2025.\n\n' +
     'All CSV/ZIP attachments will be extracted and saved.\n' +
     'Files will be organized by date, then categorized by network.\n\n' +
-    'Expected: ~2,400 emails (8 months × 30 days)\n' +
-    'Processing: 20 emails per run (auto-resumes)\n\n' +
+    'Expected: ~8,880 emails (37 networks × 30 days × 8 months)\n' +
+    'Processing: 500 emails per month (~1,110/month total)\n' +
+    'Estimated time: 2-3 hours with auto-resume trigger\n' +
+    'Duplicates: Automatically skipped\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
   );
@@ -3148,6 +3151,35 @@ function resumeRawDataArchive() {
   }
   
   processNextRawDataBatch_();
+}
+
+// ---------------------
+// Reset and Restart Archive from April (Clean Slate)
+// ---------------------
+function resetRawDataArchive() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Reset Raw Data Archive',
+    'This will RESET the archive and start fresh from April 2025.\n\n' +
+    'Current progress will be lost, but existing files in Drive will remain.\n' +
+    'Duplicate files will be skipped automatically.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    return;
+  }
+  
+  // Clear the archive state
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty('RAW_ARCHIVE_STATE');
+  
+  ui.alert(
+    'Archive Reset',
+    'Archive state cleared. Now run "Archive All Raw Data" to start fresh.',
+    ui.ButtonSet.OK
+  );
 }
 
 // ---------------------
