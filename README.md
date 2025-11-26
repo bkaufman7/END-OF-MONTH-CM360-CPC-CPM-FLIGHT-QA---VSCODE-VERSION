@@ -1,7 +1,7 @@
 # CM360 End of Month Audit System
 
-> **Intelligent, cascading automation for CM360 campaign quality assurance**  
-> A Google Apps Script solution that eliminates manual auditing, prevents billing errors, and delivers actionable insights through automated violation detection and smart reporting.
+> **Intelligent, cascading automation for CM360 campaign quality assurance with comprehensive data archiving**  
+> A Google Apps Script solution that eliminates manual auditing, prevents billing errors, delivers actionable insights through automated violation detection and smart reporting, and archives all historical data for ROI analysis.
 
 ---
 
@@ -389,6 +389,69 @@ Maps placements to responsible team members:
 
 **Email Routing**: Issues grouped by owner in "Immediate Attention" section
 
+### **📁 Data Archive System**
+
+Comprehensive archiving for historical analysis and ROI tracking:
+
+#### **Historical Violation Reports Archive**
+- **Purpose**: Save all monthly violation report emails for trend analysis
+- **Email Subject**: `CM360 CPC/CPM FLIGHT QA`
+- **Date Range**: April-November 2025 (15th-31st of each month)
+- **Processing**: ~128 emails (8 months × 16 days)
+- **File Types**: XLSX attachments
+- **Structure**: `Historical Violation Reports/2025/04-April/CM360_Report_2025-04-15.xlsx`
+- **Features**:
+  - Auto-resume on interruption
+  - Progress emails per month
+  - Handles both MM.DD.YY and M/D/YY date formats
+  - ZIP auto-extraction
+
+#### **Raw Data Archive**
+- **Purpose**: Save ALL daily raw data files for ROI analysis
+- **Email Subject**: `BKCM360 Global QA Check`
+- **Scope**: 37 networks × 30 days × 8 months = ~8,880 files
+- **Batch Size**: 500 emails per month (optimized for 6-min execution limit)
+- **Processing Time**: ~2-3 hours with auto-resume trigger
+- **Duplicate Protection**: Automatically skips existing files
+
+**Phase 1 - Save All Files**:
+- Processes month-by-month (April → November)
+- Extracts ALL CSV/XLSX/ZIP attachments
+- No network filtering during save (prevents file loss)
+- Organizes by date: `Raw Data/2025/04-April/2025-04-15/file.csv`
+- Auto-resume trigger runs every 10 minutes
+- Progress emails after each month
+- Detailed completion email with statistics
+
+**Phase 2 - Categorize by Network** (Manual):
+- Run after Phase 1 completes
+- Analyzes all saved files
+- Extracts network ID from filename (3-7 digit numbers)
+- Moves files to network folders: `Raw Data/Networks/898158 - Network Name/2025-04-15/`
+- Provides detailed statistics:
+  - Files categorized vs uncategorized
+  - Top networks by file count
+  - Processing rate (files/minute)
+  - Networks found
+
+**Key Features**:
+- **Gmail Quota Handling**: Auto-resumes next day if quota exceeded (~20K/day limit)
+- **Time Limit Safe**: Batch size optimized for 6-minute execution window
+- **State Management**: Saves progress, resumes from interruption
+- **Reset Capability**: Clean slate restart option
+- **Email Notifications**: Progress updates + completion summary with stats
+
+**ROI Analysis Use Case**:
+Once complete, enables analysis of:
+- Violations detected per network/month
+- Violations rectified (changes made)
+- Cost savings ($) per network
+- Trend analysis (improving vs declining performance)
+
+### **📊 V2 Dashboard (Beta)**
+
+Enhanced violations view with priority scoring and financial impact (see DEPLOYMENT.md for full details).
+
 ### **📧 Email Reporting System**
 
 **Monthly Summary Email** (sent after 15th at 1:45 AM):
@@ -682,6 +745,25 @@ function withBackoff_(fn, maxTries = 5) {
 | **Email not received** | No summary email after 15th | Verify EMAIL LIST sheet, check spam folder, review execution logs |
 | **Chunking stuck** | QA runs 10+ times | Clear DocumentProperties `qa_progress_v2`, re-run manually |
 | **Trigger not firing** | No 1:15 AM execution | Recreate via "Create Daily Email Trigger" menu |
+| **Archive quota exceeded** | Gmail quota error | Wait until midnight PT (quota resets), resume next day |
+| **Archive not progressing** | Stuck on one month | Check auto-resume trigger exists, manually resume |
+
+### **Archive Menu Functions**
+
+**📁 Historical Archive** (Violation Reports):
+- **Archive All (April-Nov 2025)** - Process all months automatically
+- **Archive Single Month** - Process one specific month
+- **View Archive Progress** - Check current status
+- **Resume Archive** - Continue interrupted archive
+
+**📦 Raw Data Archive**:
+- **Archive All Raw Data** - Save all raw data files (Apr-Nov 2025)
+- **View Raw Data Progress** - Check archiving status  
+- **Resume Raw Data Archive** - Continue if interrupted
+- **Reset & Restart from April** - Clean slate restart
+- **Create Auto-Resume Trigger** - Set up 10-min automatic continuation
+- **Delete Auto-Resume Trigger** - Stop automation
+- **Categorize Files by Network** - Organize saved files into network folders
 
 ### **Maintenance Tasks**
 
