@@ -3051,7 +3051,7 @@ function getMonthName_(month) {
 // ---------------------
 const RAW_DATA_FOLDER_ID = '1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN'; // Same root as other archives
 const RAW_DATA_SEARCH_SUBJECT = 'BKCM360 Global QA Check';
-const RAW_BATCH_SIZE = 20; // Process 20 emails per execution (conservative for large attachments)
+const RAW_BATCH_SIZE = 500; // Process up to 500 emails per month (37 networks × 30 days = ~1,110 emails/month)
 
 // ---------------------
 // MAIN: Archive All Raw Data (April-November 2025)
