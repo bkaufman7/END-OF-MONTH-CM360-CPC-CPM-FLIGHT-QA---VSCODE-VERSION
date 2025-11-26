@@ -116,18 +116,26 @@ Raw Data/
 - **Subject:** "📦 CM360 Raw Data: April 2025 Complete" (example)
 - **Contains:** Emails processed, files saved, total progress, next month
 
-### Completion Email
-- **Subject:** "✅ CM360 Raw Data Archive Complete"
-- **Contains:** Total emails, total files, duration, Drive folder link
+### Archive Completion Email
+- **Subject:** "✅ CM360 Raw Data Archive Complete - Summary Report"
+- **Contains:** 
+  - Overall statistics (emails, files, averages)
+  - Performance metrics (duration, start/end times)
+  - File location and structure
+  - Next steps for categorization
 
 ### Error Email (if issue occurs)
 - **Subject:** "⚠️ CM360 Raw Data Archive Error"
 - **Contains:** Current month, error message, progress stats
 - **Action:** Use "Resume Raw Data Archive" to continue
 
-### Categorization Email
-- **Subject:** "✅ CM360 Raw Data Categorization Complete"
-- **Contains:** Files categorized, files uncategorized, networks found
+### Categorization Completion Email
+- **Subject:** "✅ CM360 Raw Data Categorization Complete - Summary Report"
+- **Contains:**
+  - Overall statistics (total files, categorized %, uncategorized %)
+  - Performance metrics (duration, processing rate)
+  - Top 10 networks by file count
+  - File locations and next steps for ROI analysis
 
 ---
 

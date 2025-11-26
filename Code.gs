@@ -3239,23 +3239,92 @@ function processNextRawDataBatch_() {
   // Check if we're done (November = month 11)
   if (state.currentMonth > 11) {
     state.status = 'completed';
+    state.endTime = new Date().toISOString();
     props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
     
-    // Send completion email
+    // Calculate duration
+    const startTime = new Date(state.startTime);
+    const endTime = new Date(state.endTime);
+    const durationMs = endTime - startTime;
+    const hours = Math.floor(durationMs / (1000 * 60 * 60));
+    const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    // Calculate averages
+    const avgEmailsPerMonth = Math.round(state.emailsProcessed / 8);
+    const avgFilesPerMonth = Math.round(state.filesSaved / 8);
+    const avgFilesPerEmail = (state.emailsProcessed > 0 ? (state.filesSaved / state.emailsProcessed).toFixed(1) : 0);
+    
+    // Send detailed completion email
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '✅ CM360 Raw Data Archive Complete',
-      htmlBody: `<h3>Raw Data Archive Complete</h3>
-        <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
-        <p><strong>Total files saved:</strong> ${state.filesSaved}</p>
-        <p><strong>Duration:</strong> ${new Date(state.startTime).toLocaleString()} - ${new Date().toLocaleString()}</p>
-        <p><strong>Location:</strong> <a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}">Raw Data Archive</a></p>
-        <p>Next step: Run "Categorize Raw Data by Network" to organize files.</p>`
+      subject: '✅ CM360 Raw Data Archive Complete - Summary Report',
+      htmlBody: `
+        <h2 style="color: #0066cc;">✅ CM360 Raw Data Archive Complete</h2>
+        
+        <h3>📊 Overall Statistics</h3>
+        <table style="border-collapse: collapse; width: 100%;">
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Emails Processed</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${state.emailsProcessed}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Files Saved</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${state.filesSaved}</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Average Files per Email</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${avgFilesPerEmail}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Months Archived</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">8 (April - November 2025)</td>
+          </tr>
+        </table>
+        
+        <h3>⏱️ Performance</h3>
+        <table style="border-collapse: collapse; width: 100%;">
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Start Time</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${startTime.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>End Time</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${endTime.toLocaleString()}</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Duration</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${hours}h ${minutes}m</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Avg Emails per Month</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${avgEmailsPerMonth}</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Avg Files per Month</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${avgFilesPerMonth}</td>
+          </tr>
+        </table>
+        
+        <h3>📁 File Location</h3>
+        <p><a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}" style="color: #0066cc; font-weight: bold;">View Raw Data Archive in Google Drive</a></p>
+        <p><strong>Folder Structure:</strong> Raw Data/2025/[Month]/[Date]/files</p>
+        
+        <h3>📋 Next Steps</h3>
+        <ol>
+          <li><strong>Review the data:</strong> Check Drive folder to verify all files saved correctly</li>
+          <li><strong>Categorize by network:</strong> Run "Categorize Raw Data by Network" from the menu</li>
+          <li><strong>Build ROI dashboard:</strong> Use categorized data to analyze violations and cost savings</li>
+        </ol>
+        
+        <hr style="border: 1px solid #ddd; margin: 20px 0;">
+        <p style="color: #666; font-size: 12px;">Auto-resume trigger has been automatically deleted. Archive state saved in Script Properties.</p>
+      `
     });
     
     // Delete auto-resume trigger if exists
     deleteRawDataAutoResumeTrigger();
     
+    Logger.log('Raw data archive completed successfully');
     return;
   }
   
@@ -3456,6 +3525,7 @@ function categorizeRawDataByNetwork() {
     'This will organize all saved raw data files into network folders.\n\n' +
     'Files will be analyzed and moved to:\n' +
     'Raw Data/Networks/[NetworkID - NetworkName]/[Date]/\n\n' +
+    'This may take 10-20 minutes depending on file count.\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
   );
@@ -3464,27 +3534,128 @@ function categorizeRawDataByNetwork() {
     return;
   }
   
-  ui.alert('Categorization Started', 'This may take several minutes. You will receive an email when complete.', ui.ButtonSet.OK);
+  ui.alert('Categorization Started', 'Processing all files... You will receive an email when complete with detailed statistics.', ui.ButtonSet.OK);
+  
+  const startTime = new Date();
   
   try {
     const networkMap = loadNetworkMapping_();
-    const stats = categorizeAllFiles_(networkMap);
     
+    if (Object.keys(networkMap).length === 0) {
+      ui.alert('Error', 'No networks found in Networks tab. Please check columns A and B.', ui.ButtonSet.OK);
+      return;
+    }
+    
+    const stats = categorizeAllFiles_(networkMap);
+    const endTime = new Date();
+    const durationMin = Math.round((endTime - startTime) / (1000 * 60));
+    
+    // Send detailed completion email
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '✅ CM360 Raw Data Categorization Complete',
-      htmlBody: `<h3>File Categorization Complete</h3>
-        <p><strong>Files categorized:</strong> ${stats.filesCategorized}</p>
-        <p><strong>Files uncategorized:</strong> ${stats.filesUncategorized}</p>
-        <p><strong>Networks found:</strong> ${stats.networksFound}</p>
-        <p><strong>Location:</strong> <a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}">Raw Data/Networks/</a></p>`
+      subject: '✅ CM360 Raw Data Categorization Complete - Summary Report',
+      htmlBody: `
+        <h2 style="color: #0066cc;">✅ File Categorization Complete</h2>
+        
+        <h3>📊 Overall Statistics</h3>
+        <table style="border-collapse: collapse; width: 100%;">
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Files Processed</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${stats.totalFiles}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Files Categorized</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${stats.filesCategorized} (${((stats.filesCategorized / stats.totalFiles) * 100).toFixed(1)}%)</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Files Uncategorized</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${stats.filesUncategorized} (${((stats.filesUncategorized / stats.totalFiles) * 100).toFixed(1)}%)</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Networks Found</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${stats.networksFound} of ${Object.keys(networkMap).length} total</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Date Folders Processed</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${stats.dateFoldersProcessed}</td>
+          </tr>
+        </table>
+        
+        <h3>⏱️ Performance</h3>
+        <table style="border-collapse: collapse; width: 100%;">
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Start Time</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${startTime.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>End Time</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${endTime.toLocaleString()}</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Duration</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${durationMin} minutes</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Processing Rate</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${Math.round(stats.totalFiles / durationMin)} files/minute</td>
+          </tr>
+        </table>
+        
+        <h3>🌐 Top Networks by File Count</h3>
+        <table style="border-collapse: collapse; width: 100%;">
+          <tr style="background-color: #f0f0f0;">
+            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Network</th>
+            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Files</th>
+          </tr>
+          ${stats.networkBreakdown.slice(0, 10).map((net, i) => `
+            <tr${i % 2 === 0 ? ' style="background-color: #f9f9f9;"' : ''}>
+              <td style="padding: 8px; border: 1px solid #ddd;">${net.name}</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${net.count}</td>
+            </tr>
+          `).join('')}
+        </table>
+        ${stats.networkBreakdown.length > 10 ? `<p style="color: #666; font-size: 12px;">...and ${stats.networkBreakdown.length - 10} more networks</p>` : ''}
+        
+        <h3>📁 File Locations</h3>
+        <p><strong>Categorized Files:</strong> <a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}" style="color: #0066cc;">Raw Data/Networks/</a></p>
+        <p><strong>Uncategorized Files:</strong> Remain in Raw Data/2025/[Month]/[Date]/ folders</p>
+        
+        <h3>📋 Next Steps</h3>
+        <ol>
+          <li><strong>Review uncategorized files:</strong> ${stats.filesUncategorized > 0 ? 'Check files without network IDs in filename' : 'None to review! ✅'}</li>
+          <li><strong>Verify network folders:</strong> Spot-check a few networks to confirm proper organization</li>
+          <li><strong>Build ROI analysis:</strong> Ready to analyze violations and cost savings per network</li>
+        </ol>
+        
+        <hr style="border: 1px solid #ddd; margin: 20px 0;">
+        <p style="color: #666; font-size: 12px;">Categorization process completed successfully. Original date-organized folders preserved.</p>
+      `
     });
     
-    ui.alert('Categorization Complete', `${stats.filesCategorized} files organized into ${stats.networksFound} network folders.`, ui.ButtonSet.OK);
+    ui.alert(
+      'Categorization Complete',
+      `✅ ${stats.filesCategorized} files organized into ${stats.networksFound} network folders\n` +
+      `⚠️ ${stats.filesUncategorized} files remain uncategorized\n\n` +
+      `Duration: ${durationMin} minutes\n\n` +
+      'Check your email for detailed statistics.',
+      ui.ButtonSet.OK
+    );
     
   } catch (error) {
     Logger.log('Categorization error: ' + error);
-    ui.alert('Error', 'Categorization failed: ' + error, ui.ButtonSet.OK);
+    
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '⚠️ CM360 Raw Data Categorization Error',
+      htmlBody: `
+        <h3 style="color: #cc0000;">Categorization Error</h3>
+        <p><strong>Error:</strong> ${error}</p>
+        <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+        <p><strong>Action:</strong> Try running "Categorize Raw Data by Network" again or check the Networks tab data.</p>
+      `
+    });
+    
+    ui.alert('Error', 'Categorization failed: ' + error + '\n\nCheck your email for details.', ui.ButtonSet.OK);
   }
 }
 
@@ -3506,7 +3677,9 @@ function categorizeAllFiles_(networkMap) {
   
   let filesCategorized = 0;
   let filesUncategorized = 0;
+  let dateFoldersProcessed = 0;
   const networksFound = new Set();
+  const networkFileCounts = {}; // Track files per network
   
   // Iterate through year folders (2025)
   const yearFolders = rawDataFolder.getFolders();
@@ -3514,16 +3687,22 @@ function categorizeAllFiles_(networkMap) {
     const yearFolder = yearFolders.next();
     if (yearFolder.getName() === 'Networks') continue; // Skip Networks folder
     
+    Logger.log(`Processing year folder: ${yearFolder.getName()}`);
+    
     // Iterate through month folders (04-April, 05-May, etc.)
     const monthFolders = yearFolder.getFolders();
     while (monthFolders.hasNext()) {
       const monthFolder = monthFolders.next();
+      Logger.log(`  Processing month folder: ${monthFolder.getName()}`);
       
       // Iterate through date folders (2025-04-15, etc.)
       const dateFolders = monthFolder.getFolders();
       while (dateFolders.hasNext()) {
         const dateFolder = dateFolders.next();
         const dateStr = dateFolder.getName(); // e.g., "2025-04-15"
+        dateFoldersProcessed++;
+        
+        Logger.log(`    Processing date folder: ${dateStr}`);
         
         // Iterate through files in this date folder
         const files = dateFolder.getFiles();
@@ -3545,6 +3724,12 @@ function categorizeAllFiles_(networkMap) {
             filesCategorized++;
             networksFound.add(networkId);
             
+            // Track count per network
+            if (!networkFileCounts[networkId]) {
+              networkFileCounts[networkId] = { name: networkName, count: 0 };
+            }
+            networkFileCounts[networkId].count++;
+            
             Logger.log(`Categorized: ${filename} → ${networkId} - ${networkName}/${dateStr}`);
           } else {
             filesUncategorized++;
@@ -3555,10 +3740,22 @@ function categorizeAllFiles_(networkMap) {
     }
   }
   
+  // Sort networks by file count (descending)
+  const networkBreakdown = Object.keys(networkFileCounts)
+    .map(id => ({
+      id: id,
+      name: `${id} - ${networkFileCounts[id].name}`,
+      count: networkFileCounts[id].count
+    }))
+    .sort((a, b) => b.count - a.count);
+  
   return {
     filesCategorized: filesCategorized,
     filesUncategorized: filesUncategorized,
-    networksFound: networksFound.size
+    totalFiles: filesCategorized + filesUncategorized,
+    networksFound: networksFound.size,
+    dateFoldersProcessed: dateFoldersProcessed,
+    networkBreakdown: networkBreakdown
   };
 }
 
