@@ -3051,20 +3051,22 @@ function getMonthName_(month) {
 // ---------------------
 const RAW_DATA_FOLDER_ID = '1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN'; // Same root as other archives
 const RAW_DATA_SEARCH_SUBJECT = 'BKCM360 Global QA Check';
-const RAW_BATCH_SIZE = 20; // Process 20 emails per execution (conservative for large attachments)
+const RAW_BATCH_SIZE = 100; // Process 100 emails per execution (increased from 20)
+const RAW_SEARCH_MAX = 500; // Gmail's max threads per search
 
 // ---------------------
-// MAIN: Archive All Raw Data (April-November 2025)
+// MAIN: Archive All Raw Data (Complete Inbox)
 // ---------------------
 function archiveAllRawData() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     'Archive Raw Data',
-    'This will save ALL raw data files from April-November 2025.\n\n' +
+    'This will save ALL raw data files from your CM360 inbox.\n\n' +
+    'Strategy: Retrieve ALL emails with subject "BKCM360 Global QA Check"\n' +
     'All CSV/ZIP attachments will be extracted and saved.\n' +
-    'Files will be organized by date, then categorized by network.\n\n' +
-    'Expected: ~2,400 emails (8 months × 30 days)\n' +
-    'Processing: 20 emails per run (auto-resumes)\n\n' +
+    'Files organized by date automatically.\n\n' +
+    'Expected: 100 emails per batch (auto-resumes every 10 min)\n' +
+    'Process runs in background until complete.\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
   );
@@ -3078,9 +3080,7 @@ function archiveAllRawData() {
   const props = PropertiesService.getScriptProperties();
   props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify({
     status: 'running',
-    lastProcessedDate: null, // Track by date instead of network
-    currentYear: 2025,
-    currentMonth: 4, // Start with April
+    startIndex: 0, // Gmail search pagination index
     emailsProcessed: 0,
     filesExtracted: 0,
     filesSaved: 0,
@@ -3088,6 +3088,16 @@ function archiveAllRawData() {
   }));
   
   ui.alert(
+    'Archive Started',
+    'Raw data archive started.\n\n' +
+    'Run "Create Auto-Resume Trigger" to enable automatic processing every 10 minutes.\n\n' +
+    'Or manually run "Resume Raw Data Archive" to continue.',
+    ui.ButtonSet.OK
+  );
+  
+  // Start first batch
+  processNextRawDataBatch_();
+}
     'Archive Started',
     'Archive is running. Use "View Raw Data Progress" to check status.\n\n' +
     'Set up a time-based trigger to auto-resume every 10 minutes.',
@@ -3113,12 +3123,11 @@ function viewRawDataProgress() {
   }
   
   const state = JSON.parse(stateJson);
-  const monthName = getMonthName_(state.currentMonth);
   
   ui.alert(
     'Raw Data Archive Progress',
     `Status: ${state.status}\n` +
-    `Current: ${monthName} ${state.currentYear}\n` +
+    `Current search index: ${state.startIndex}\n` +
     `Emails processed: ${state.emailsProcessed}\n` +
     `Files saved: ${state.filesSaved}\n` +
     `Started: ${new Date(state.startTime).toLocaleString()}`,
@@ -3223,7 +3232,7 @@ function autoResumeRawDataArchive() {
 }
 
 // ---------------------
-// INTERNAL: Process Next Batch
+// INTERNAL: Process Next Batch (Search All Emails)
 // ---------------------
 function processNextRawDataBatch_() {
   const props = PropertiesService.getScriptProperties();
@@ -3236,120 +3245,105 @@ function processNextRawDataBatch_() {
   
   const state = JSON.parse(stateJson);
   
-  // Check if we're done (November = month 11)
-  if (state.currentMonth > 11) {
-    state.status = 'completed';
-    state.endTime = new Date().toISOString();
-    props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
-    
-    // Calculate duration
-    const startTime = new Date(state.startTime);
-    const endTime = new Date(state.endTime);
-    const durationMs = endTime - startTime;
-    const hours = Math.floor(durationMs / (1000 * 60 * 60));
-    const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
-    
-    // Calculate averages
-    const avgEmailsPerMonth = Math.round(state.emailsProcessed / 8);
-    const avgFilesPerMonth = Math.round(state.filesSaved / 8);
-    const avgFilesPerEmail = (state.emailsProcessed > 0 ? (state.filesSaved / state.emailsProcessed).toFixed(1) : 0);
-    
-    // Send detailed completion email
-    MailApp.sendEmail({
-      to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '✅ CM360 Raw Data Archive Complete - Summary Report',
-      htmlBody: `
-        <h2 style="color: #0066cc;">✅ CM360 Raw Data Archive Complete</h2>
-        
-        <h3>📊 Overall Statistics</h3>
-        <table style="border-collapse: collapse; width: 100%;">
-          <tr style="background-color: #f0f0f0;">
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Emails Processed</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${state.emailsProcessed}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Files Saved</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${state.filesSaved}</td>
-          </tr>
-          <tr style="background-color: #f0f0f0;">
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Average Files per Email</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${avgFilesPerEmail}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Months Archived</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">8 (April - November 2025)</td>
-          </tr>
-        </table>
-        
-        <h3>⏱️ Performance</h3>
-        <table style="border-collapse: collapse; width: 100%;">
-          <tr style="background-color: #f0f0f0;">
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Start Time</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${startTime.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>End Time</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${endTime.toLocaleString()}</td>
-          </tr>
-          <tr style="background-color: #f0f0f0;">
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Duration</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${hours}h ${minutes}m</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Avg Emails per Month</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${avgEmailsPerMonth}</td>
-          </tr>
-          <tr style="background-color: #f0f0f0;">
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Avg Files per Month</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${avgFilesPerMonth}</td>
-          </tr>
-        </table>
-        
-        <h3>📁 File Location</h3>
-        <p><a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}" style="color: #0066cc; font-weight: bold;">View Raw Data Archive in Google Drive</a></p>
-        <p><strong>Folder Structure:</strong> Raw Data/2025/[Month]/[Date]/files</p>
-        
-        <h3>📋 Next Steps</h3>
-        <ol>
-          <li><strong>Review the data:</strong> Check Drive folder to verify all files saved correctly</li>
-          <li><strong>Categorize by network:</strong> Run "Categorize Raw Data by Network" from the menu</li>
-          <li><strong>Build ROI dashboard:</strong> Use categorized data to analyze violations and cost savings</li>
-        </ol>
-        
-        <hr style="border: 1px solid #ddd; margin: 20px 0;">
-        <p style="color: #666; font-size: 12px;">Auto-resume trigger has been automatically deleted. Archive state saved in Script Properties.</p>
-      `
-    });
-    
-    // Delete auto-resume trigger if exists
-    deleteRawDataAutoResumeTrigger();
-    
-    Logger.log('Raw data archive completed successfully');
-    return;
-  }
-  
-  // Process current month
   try {
-    const batchStats = processSingleMonthRawData_(state.currentYear, state.currentMonth);
+    // Search for ALL emails with the subject (no date filters)
+    const query = `subject:"${RAW_DATA_SEARCH_SUBJECT}"`;
     
-    state.emailsProcessed += batchStats.emailsProcessed;
-    state.filesExtracted += batchStats.filesExtracted;
-    state.filesSaved += batchStats.filesSaved;
-    state.currentMonth++;
+    Logger.log(`Searching Gmail from index ${state.startIndex} with batch size ${RAW_BATCH_SIZE}`);
     
+    const threads = GmailApp.search(query, state.startIndex, RAW_BATCH_SIZE);
+    
+    Logger.log(`Found ${threads.length} threads`);
+    
+    // If no threads found, we're done
+    if (threads.length === 0) {
+      state.status = 'completed';
+      state.endTime = new Date().toISOString();
+      props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+      
+      // Send completion email
+      sendRawDataCompletionEmail_(state);
+      
+      // Auto-delete trigger
+      deleteRawDataAutoResumeTrigger();
+      
+      Logger.log('✅ Raw data archive complete!');
+      return;
+    }
+    
+    // Process this batch of threads
+    let batchEmailsProcessed = 0;
+    let batchFilesSaved = 0;
+    
+    for (const thread of threads) {
+      const messages = thread.getMessages();
+      
+      for (const message of messages) {
+        const emailDate = message.getDate();
+        const year = emailDate.getFullYear();
+        const month = emailDate.getMonth() + 1; // JavaScript months are 0-indexed
+        const dateStr = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        
+        // Get or create folder structure: Raw Data/2025/05-May/2025-05-15/
+        const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
+        const dateFolder = getOrCreateDateFolder_(monthFolder, dateStr);
+        
+        const attachments = message.getAttachments();
+        
+        for (const attachment of attachments) {
+          const filename = attachment.getName();
+          const lowerFilename = filename.toLowerCase();
+          
+          // Handle ZIP files
+          if (lowerFilename.endsWith('.zip')) {
+            try {
+              const zipBlob = attachment.copyBlob();
+              const unzipped = Utilities.unzip(zipBlob);
+              
+              for (const file of unzipped) {
+                const unzippedName = file.getName().toLowerCase();
+                if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
+                  if (saveRawFileToDrive_(file, dateFolder, file.getName())) {
+                    batchFilesSaved++;
+                  }
+                }
+              }
+            } catch (error) {
+              Logger.log(`Error unzipping ${filename}: ${error}`);
+            }
+          }
+          // Handle CSV and XLSX files directly
+          else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
+            if (saveRawFileToDrive_(attachment, dateFolder, filename)) {
+              batchFilesSaved++;
+            }
+          }
+        }
+        
+        batchEmailsProcessed++;
+      }
+    }
+    
+    // Update state
+    state.startIndex += RAW_BATCH_SIZE;
+    state.emailsProcessed += batchEmailsProcessed;
+    state.filesSaved += batchFilesSaved;
     props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
     
-    // Send progress email after each month
-    const monthName = getMonthName_(state.currentMonth - 1);
-    MailApp.sendEmail({
-      to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: `📦 CM360 Raw Data: ${monthName} ${state.currentYear} Complete`,
-      htmlBody: `<h3>${monthName} ${state.currentYear} Archived</h3>
-        <p><strong>Emails processed:</strong> ${batchStats.emailsProcessed}</p>
-        <p><strong>Files saved:</strong> ${batchStats.filesSaved}</p>
-        <p><strong>Total progress:</strong> ${state.emailsProcessed} emails, ${state.filesSaved} files</p>
-        <p><strong>Next:</strong> ${state.currentMonth <= 11 ? getMonthName_(state.currentMonth) + ' ' + state.currentYear : 'Complete'}</p>`
-    });
+    Logger.log(`Batch complete: ${batchEmailsProcessed} emails, ${batchFilesSaved} files saved. Next index: ${state.startIndex}`);
+    
+    // Send progress email every 500 emails
+    if (state.emailsProcessed % 500 === 0) {
+      MailApp.sendEmail({
+        to: 'platformsolutionsadopshorizon@gmail.com',
+        subject: `📊 CM360 Raw Data Archive Progress - ${state.emailsProcessed} emails`,
+        htmlBody: `<h3>Raw Data Archive Progress</h3>
+        <p><strong>Emails processed:</strong> ${state.emailsProcessed}</p>
+        <p><strong>Files saved:</strong> ${state.filesSaved}</p>
+        <p><strong>Current search index:</strong> ${state.startIndex}</p>
+        <p><strong>Started:</strong> ${new Date(state.startTime).toLocaleString()}</p>`
+      });
+    }
     
   } catch (error) {
     Logger.log('Error processing batch: ' + error);
@@ -3358,116 +3352,79 @@ function processNextRawDataBatch_() {
       to: 'platformsolutionsadopshorizon@gmail.com',
       subject: '⚠️ CM360 Raw Data Archive Error',
       htmlBody: `<h3>Raw Data Archive Error</h3>
-        <p><strong>Month:</strong> ${getMonthName_(state.currentMonth)} ${state.currentYear}</p>
         <p><strong>Error:</strong> ${error}</p>
         <p><strong>Progress:</strong> ${state.emailsProcessed} emails, ${state.filesSaved} files saved</p>
+        <p><strong>Search index:</strong> ${state.startIndex}</p>
         <p>Use "Resume Raw Data Archive" to continue.</p>`
     });
   }
 }
 
 // ---------------------
-// INTERNAL: Process Single Month Raw Data (Save Everything)
+// INTERNAL: Send Completion Email
 // ---------------------
-function processSingleMonthRawData_(year, month) {
-  const monthStr = String(month).padStart(2, '0');
-  const monthName = getMonthName_(month);
+function sendRawDataCompletionEmail_(state) {
+  const startTime = new Date(state.startTime);
+  const endTime = new Date(state.endTime);
+  const durationMs = endTime - startTime;
+  const hours = Math.floor(durationMs / (1000 * 60 * 60));
+  const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
   
-  // Search Gmail for this month's raw data
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0, 23, 59, 59); // Last day of month
+  const avgFilesPerEmail = (state.emailsProcessed > 0 ? (state.filesSaved / state.emailsProcessed).toFixed(1) : 0);
   
-  const query = `subject:"${RAW_DATA_SEARCH_SUBJECT}" after:${Math.floor(startDate.getTime()/1000)} before:${Math.floor(endDate.getTime()/1000)}`;
-  
-  // Gmail search pagination - get ALL threads for this month
-  let allThreads = [];
-  let startIndex = 0;
-  const maxPerBatch = 500; // Gmail's max
-  
-  while (true) {
-    const threads = GmailApp.search(query, startIndex, maxPerBatch);
-    if (threads.length === 0) break;
-    
-    allThreads = allThreads.concat(threads);
-    Logger.log(`Found ${threads.length} threads at index ${startIndex} for ${monthName} ${year}`);
-    
-    // If we got fewer than max, we've hit the end
-    if (threads.length < maxPerBatch) break;
-    
-    startIndex += maxPerBatch;
-    
-    // Safety: Gmail typically has a hard limit around 500-1000 threads per search
-    // For 37 networks × 30 days = 1,110 emails, we need 2-3 batches
-    if (startIndex > 2000) {
-      Logger.log(`⚠️ Warning: Hit pagination limit at ${startIndex} threads for ${monthName}`);
-      break;
-    }
-  }
-  
-  Logger.log(`Total threads found for ${monthName} ${year}: ${allThreads.length}`);
-  
-  let emailsProcessed = 0;
-  let filesExtracted = 0;
-  let filesSaved = 0;
-  
-  // Get or create month folder: Raw Data/2025/04-April/
-  const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
-  
-  for (const thread of allThreads) {
-  
-  for (const thread of threads) {
-    const messages = thread.getMessages();
-    
-    for (const message of messages) {
-      const emailDate = message.getDate();
-      const dateStr = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  MailApp.sendEmail({
+    to: 'platformsolutionsadopshorizon@gmail.com',
+    subject: '✅ CM360 Raw Data Archive Complete - Full Inbox Archived',
+    htmlBody: `
+      <h2 style="color: #0066cc;">✅ CM360 Raw Data Archive Complete</h2>
       
-      // Get or create date folder: Raw Data/2025/04-April/2025-04-15/
-      const dateFolder = getOrCreateDateFolder_(monthFolder, dateStr);
+      <h3>📊 Overall Statistics</h3>
+      <table style="border-collapse: collapse; width: 100%;">
+        <tr style="background-color: #f0f0f0;">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Emails Processed</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${state.emailsProcessed}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Files Saved</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${state.filesSaved}</td>
+        </tr>
+        <tr style="background-color: #f0f0f0;">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Average Files per Email</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${avgFilesPerEmail}</td>
+        </tr>
+      </table>
       
-      const attachments = message.getAttachments();
+      <h3>⏱️ Performance</h3>
+      <table style="border-collapse: collapse; width: 100%;">
+        <tr style="background-color: #f0f0f0;">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Start Time</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${startTime.toLocaleString()}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>End Time</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${endTime.toLocaleString()}</td>
+        </tr>
+        <tr style="background-color: #f0f0f0;">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Duration</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${hours}h ${minutes}m</td>
+        </tr>
+      </table>
       
-      for (const attachment of attachments) {
-        const filename = attachment.getName();
-        const lowerFilename = filename.toLowerCase();
-        
-        filesExtracted++;
-        
-        // Handle ZIP files
-        if (lowerFilename.endsWith('.zip')) {
-          try {
-            const zipBlob = attachment.copyBlob();
-            const unzipped = Utilities.unzip(zipBlob);
-            
-            for (const file of unzipped) {
-              const unzippedName = file.getName().toLowerCase();
-              if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
-                saveRawFileToDrive_(file, dateFolder, file.getName());
-                filesSaved++;
-              }
-            }
-          } catch (error) {
-            Logger.log(`Error unzipping ${filename}: ${error}`);
-          }
-        }
-        // Handle CSV and XLSX files directly
-        else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
-          saveRawFileToDrive_(attachment, dateFolder, filename);
-          filesSaved++;
-        }
-      }
+      <h3>📁 File Location</h3>
+      <p><a href="https://drive.google.com/drive/folders/${RAW_DATA_FOLDER_ID}" style="color: #0066cc; font-weight: bold;">View Raw Data Archive in Google Drive</a></p>
+      <p><strong>Folder Structure:</strong> Raw Data/[Year]/[Month]/[Date]/files</p>
       
-      emailsProcessed++;
-    }
-  }
-  
-  Logger.log(`Processed ${monthName} ${year}: ${emailsProcessed} emails, ${filesSaved} files saved`);
-  
-  return {
-    emailsProcessed: emailsProcessed,
-    filesExtracted: filesExtracted,
-    filesSaved: filesSaved
-  };
+      <h3>📋 Next Steps</h3>
+      <ol>
+        <li><strong>Review the data:</strong> Check Drive folder to verify all files saved correctly</li>
+        <li><strong>Categorize by network:</strong> Run "Categorize Raw Data by Network" from the menu</li>
+        <li><strong>Build ROI dashboard:</strong> Use categorized data to analyze violations and cost savings</li>
+      </ol>
+      
+      <hr style="border: 1px solid #ddd; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">Auto-resume trigger has been automatically deleted. Archive state saved in Script Properties.</p>
+    `
+  });
 }
 
 // ---------------------
@@ -3534,12 +3491,13 @@ function saveRawFileToDrive_(attachment, folder, filename) {
   const existingFiles = folder.getFilesByName(filename);
   if (existingFiles.hasNext()) {
     Logger.log(`File already exists: ${filename}`);
-    return;
+    return false; // File not saved (already exists)
   }
   
   // Create file
   folder.createFile(attachment.copyBlob().setName(filename));
   Logger.log(`Saved: ${filename}`);
+  return true; // File saved successfully
 }
 
 // ---------------------
