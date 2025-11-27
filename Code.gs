@@ -3590,8 +3590,10 @@ function processNextRawDataBatch_() {
     // Process this batch of threads
     let batchEmailsProcessed = 0;
     let batchFilesSaved = 0;
+    let lastProcessedEmailIndex = state.startIndex; // Track actual progress
     
-    for (const thread of threads) {
+    for (let i = 0; i < threads.length; i++) {
+      const thread = threads[i];
       const messages = thread.getMessages();
       
       for (const message of messages) {
@@ -3638,10 +3640,13 @@ function processNextRawDataBatch_() {
         
         batchEmailsProcessed++;
       }
+      
+      // Update last processed index after each thread completes
+      lastProcessedEmailIndex = state.startIndex + i + 1;
     }
     
-    // Update state
-    state.startIndex += RAW_BATCH_SIZE;
+    // Update state - ONLY increment by what we actually processed
+    state.startIndex = lastProcessedEmailIndex;
     state.emailsProcessed += batchEmailsProcessed;
     state.filesSaved += batchFilesSaved;
     props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
