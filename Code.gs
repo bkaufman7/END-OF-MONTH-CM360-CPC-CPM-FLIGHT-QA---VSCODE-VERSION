@@ -3553,8 +3553,26 @@ function processNextRawDataBatch_() {
     
     Logger.log(`Found ${threads.length} threads`);
     
-    // If no threads found, we're done
+    // If no threads found, check for new emails before declaring complete
     if (threads.length === 0) {
+      Logger.log('No more threads at current index. Checking for new emails...');
+      
+      // Check if any new emails arrived at the top of inbox (index 0)
+      const newEmailCheck = checkForNewEmails_(state);
+      
+      if (newEmailCheck.hasNewEmails) {
+        Logger.log(`Found ${newEmailCheck.newEmailCount} new emails. Restarting from index 0...`);
+        
+        // Reset to start but preserve stats
+        state.startIndex = 0;
+        state.lastCheckTime = new Date().toISOString();
+        props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+        
+        // Continue processing
+        return;
+      }
+      
+      // No new emails, we're truly done
       state.status = 'completed';
       state.endTime = new Date().toISOString();
       props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
@@ -3715,14 +3733,58 @@ function sendRawDataCompletionEmail_(state) {
       <h3>📋 Next Steps</h3>
       <ol>
         <li><strong>Review the data:</strong> Check Drive folder to verify all files saved correctly</li>
+        <li><strong>Audit completeness:</strong> Run "Audit Archive Completeness" to check for gaps</li>
         <li><strong>Categorize by network:</strong> Run "Categorize Raw Data by Network" from the menu</li>
         <li><strong>Build ROI dashboard:</strong> Use categorized data to analyze violations and cost savings</li>
       </ol>
       
       <hr style="border: 1px solid #ddd; margin: 20px 0;">
+      <p style="color: #34a853; font-size: 12px;">✅ Archive checked for new emails that arrived during processing - all caught up!</p>
       <p style="color: #666; font-size: 12px;">Auto-resume trigger has been automatically deleted. Archive state saved in Script Properties.</p>
     `
   });
+}
+
+// ---------------------
+// INTERNAL: Check for New Emails
+// ---------------------
+function checkForNewEmails_(state) {
+  try {
+    // Search for emails from index 0 (top of inbox)
+    const query = `subject:"${RAW_DATA_SEARCH_SUBJECT}"`;
+    const recentThreads = GmailApp.search(query, 0, 10); // Check first 10 emails
+    
+    if (recentThreads.length === 0) {
+      return { hasNewEmails: false, newEmailCount: 0 };
+    }
+    
+    // Get the most recent email date we've seen
+    const archiveStartTime = new Date(state.startTime);
+    
+    let newEmailCount = 0;
+    for (const thread of recentThreads) {
+      const messages = thread.getMessages();
+      for (const message of messages) {
+        const messageDate = message.getDate();
+        
+        // If email is newer than when we started, it's new
+        if (messageDate > archiveStartTime) {
+          newEmailCount++;
+        }
+      }
+    }
+    
+    Logger.log(`New email check: Found ${newEmailCount} emails newer than archive start time`);
+    
+    return {
+      hasNewEmails: newEmailCount > 0,
+      newEmailCount: newEmailCount
+    };
+    
+  } catch (error) {
+    Logger.log('Error checking for new emails: ' + error);
+    return { hasNewEmails: false, newEmailCount: 0 };
+  }
 }
 
 // ---------------------
