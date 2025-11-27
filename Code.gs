@@ -3098,15 +3098,6 @@ function archiveAllRawData() {
   // Start first batch
   processNextRawDataBatch_();
 }
-    'Archive Started',
-    'Archive is running. Use "View Raw Data Progress" to check status.\n\n' +
-    'Set up a time-based trigger to auto-resume every 10 minutes.',
-    ui.ButtonSet.OK
-  );
-  
-  // Start processing
-  processNextRawDataBatch_();
-}
 
 // ---------------------
 // View Raw Data Archive Progress
@@ -3704,8 +3695,16 @@ function categorizeAllFiles_(networkMap) {
             const networkFolder = getOrCreateNetworkFolder_(networksFolder, networkId, networkName);
             const networkDateFolder = getOrCreateDateFolder_(networkFolder, dateStr);
             
-            // Move file to network folder
-            file.moveTo(networkDateFolder);
+            // Rename file to include friendly network name
+            const newFilename = renameFileWithNetworkName_(filename, networkId, networkName);
+            
+            // Move and rename file
+            const movedFile = file.moveTo(networkDateFolder);
+            if (newFilename !== filename) {
+              movedFile.setName(newFilename);
+              Logger.log(`Renamed and moved: ${filename} → ${newFilename}`);
+            }
+            
             filesCategorized++;
             networksFound.add(networkId);
             
@@ -3715,7 +3714,7 @@ function categorizeAllFiles_(networkMap) {
             }
             networkFileCounts[networkId].count++;
             
-            Logger.log(`Categorized: ${filename} → ${networkId} - ${networkName}/${dateStr}`);
+            Logger.log(`Categorized: ${newFilename} → ${networkId} - ${networkName}/${dateStr}`);
           } else {
             filesUncategorized++;
             Logger.log(`Uncategorized: ${filename}`);
@@ -3812,6 +3811,33 @@ function extractNetworkIdFromFilename_(filename, networkMap) {
   }
   
   return null;
+}
+
+// ---------------------
+// INTERNAL: Rename File with Friendly Network Name
+// ---------------------
+function renameFileWithNetworkName_(filename, networkId, networkName) {
+  // Clean network name for filename (remove special characters, limit length)
+  const cleanNetworkName = networkName
+    .replace(/[^a-zA-Z0-9\s-]/g, '') // Remove special chars except spaces and hyphens
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .substring(0, 50); // Limit to 50 chars
+  
+  // Get file extension
+  const lastDot = filename.lastIndexOf('.');
+  const extension = lastDot > 0 ? filename.substring(lastDot) : '';
+  const nameWithoutExt = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+  
+  // Check if network name is already in the filename
+  if (nameWithoutExt.includes(cleanNetworkName)) {
+    return filename; // Already has friendly name
+  }
+  
+  // Build new filename: NetworkID_NetworkName_OriginalFilename.ext
+  // Example: 898158_Advertiser_Inc_BKCM360_Global_QA_Check_20250515.csv
+  const newFilename = `${networkId}_${cleanNetworkName}_${nameWithoutExt}${extension}`;
+  
+  return newFilename;
 }
 
 // =====================================================================================================================
