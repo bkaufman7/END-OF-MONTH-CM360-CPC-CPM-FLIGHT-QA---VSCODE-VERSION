@@ -36,6 +36,7 @@ function onOpen() {
     .addSubMenu(ui.createMenu("📦 Raw Data Archive")
       .addItem("📦 Archive All Raw Data (Apr-Nov 2025)", "archiveAllRawData")
       .addItem("📊 View Raw Data Progress", "viewRawDataProgress")
+      .addItem("📧 Email Detailed Progress Report", "emailDetailedProgressReport")
       .addItem("🔄 Resume Raw Data Archive", "resumeRawDataArchive")
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger", "createRawDataAutoResumeTrigger")
@@ -3124,6 +3125,207 @@ function viewRawDataProgress() {
     `Started: ${new Date(state.startTime).toLocaleString()}`,
     ui.ButtonSet.OK
   );
+}
+
+// ---------------------
+// Generate Detailed Progress Report (Email)
+// ---------------------
+function emailDetailedProgressReport() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  
+  if (!stateJson) {
+    SpreadsheetApp.getUi().alert('No archive in progress or completed.');
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  const startTime = new Date(state.startTime);
+  const now = new Date();
+  const elapsed = now - startTime;
+  const hours = Math.floor(elapsed / (1000 * 60 * 60));
+  const minutes = Math.floor((elapsed % (1000 * 60 * 60)) / (1000 * 60));
+  
+  // Check Drive folder stats
+  let driveStats = { monthFolders: [], totalFiles: 0, sampleCounts: [] };
+  try {
+    driveStats = analyzeDriveProgress_();
+  } catch (e) {
+    Logger.log('Error analyzing Drive: ' + e);
+  }
+  
+  // Get recent execution history
+  const executionSummary = getRecentExecutionSummary_();
+  
+  // Calculate projections
+  const avgFilesPerEmail = state.emailsProcessed > 0 ? (state.filesSaved / state.emailsProcessed).toFixed(1) : 0;
+  const processingRate = hours > 0 ? Math.round(state.emailsProcessed / hours) : 0;
+  const estimatedTotal = state.emailsProcessed > 0 ? Math.round((driveStats.totalFiles / state.emailsProcessed) * state.emailsProcessed) : 8880;
+  const percentComplete = estimatedTotal > 0 ? ((state.filesSaved / estimatedTotal) * 100).toFixed(1) : 0;
+  
+  const htmlReport = `
+    <h2 style="color: #0066cc;">📊 CM360 Raw Data Archive - Progress Report</h2>
+    
+    <h3>📈 Current Status</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr style="background-color: #f0f0f0;">
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Status</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${state.status}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Emails Processed</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${state.emailsProcessed}</td>
+      </tr>
+      <tr style="background-color: #f0f0f0;">
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Files Saved</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${state.filesSaved}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Avg Files per Email</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${avgFilesPerEmail}</td>
+      </tr>
+      <tr style="background-color: #f0f0f0;">
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Current Search Index</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${state.startIndex}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Estimated Progress</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${percentComplete}%</td>
+      </tr>
+    </table>
+    
+    <h3>⏱️ Timing</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr style="background-color: #f0f0f0;">
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Started</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${startTime.toLocaleString()}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Elapsed Time</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${hours}h ${minutes}m</td>
+      </tr>
+      <tr style="background-color: #f0f0f0;">
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Processing Rate</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${processingRate} emails/hour</td>
+      </tr>
+    </table>
+    
+    <h3>📁 Google Drive Analysis</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr style="background-color: #f0f0f0;">
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Month Folders Created</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${driveStats.monthFolders.join(', ') || 'None yet'}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Files in Drive</strong></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${driveStats.totalFiles}</td>
+      </tr>
+    </table>
+    
+    ${driveStats.sampleCounts.length > 0 ? `
+    <h3>🔍 Sample File Counts</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr style="background-color: #f0f0f0;">
+        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date Folder</th>
+        <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Files</th>
+      </tr>
+      ${driveStats.sampleCounts.map((item, i) => `
+        <tr${i % 2 === 0 ? ' style="background-color: #f9f9f9;"' : ''}>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.folder}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${item.count}</td>
+        </tr>
+      `).join('')}
+    </table>
+    ` : ''}
+    
+    <h3>🔄 Recent Execution History</h3>
+    <p>${executionSummary}</p>
+    
+    <hr style="border: 1px solid #ddd; margin: 20px 0;">
+    <p style="color: #666; font-size: 12px;">Report generated: ${now.toLocaleString()}</p>
+  `;
+  
+  MailApp.sendEmail({
+    to: 'platformsolutionsadopshorizon@gmail.com',
+    subject: `📊 CM360 Archive Progress - ${percentComplete}% Complete`,
+    htmlBody: htmlReport
+  });
+  
+  SpreadsheetApp.getUi().alert(
+    'Progress Report Sent',
+    `Detailed progress report sent to your email.\n\n` +
+    `Status: ${state.status}\n` +
+    `Files saved: ${state.filesSaved}\n` +
+    `Estimated progress: ${percentComplete}%`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+// ---------------------
+// INTERNAL: Analyze Drive Folder Progress
+// ---------------------
+function analyzeDriveProgress_() {
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_FOLDER_ID);
+  const rawDataFolders = rootFolder.getFoldersByName('Raw Data');
+  
+  if (!rawDataFolders.hasNext()) {
+    return { monthFolders: [], totalFiles: 0, sampleCounts: [] };
+  }
+  
+  const rawDataFolder = rawDataFolders.next();
+  const yearFolders = rawDataFolder.getFoldersByName('2025');
+  
+  if (!yearFolders.hasNext()) {
+    return { monthFolders: [], totalFiles: 0, sampleCounts: [] };
+  }
+  
+  const yearFolder = yearFolders.next();
+  const monthFolders = [];
+  const sampleCounts = [];
+  let totalFiles = 0;
+  
+  const monthIterator = yearFolder.getFolders();
+  while (monthIterator.hasNext()) {
+    const monthFolder = monthIterator.next();
+    const monthName = monthFolder.getName();
+    monthFolders.push(monthName);
+    
+    // Count files in first 3 date folders of each month as sample
+    const dateFolders = monthFolder.getFolders();
+    let sampleCount = 0;
+    let dateFoldersChecked = 0;
+    
+    while (dateFolders.hasNext() && dateFoldersChecked < 3) {
+      const dateFolder = dateFolders.next();
+      const files = dateFolder.getFiles();
+      let count = 0;
+      while (files.hasNext()) {
+        files.next();
+        count++;
+        totalFiles++;
+      }
+      
+      if (dateFoldersChecked === 0) {
+        sampleCounts.push({ folder: `${monthName}/${dateFolder.getName()}`, count: count });
+      }
+      
+      dateFoldersChecked++;
+    }
+  }
+  
+  return {
+    monthFolders: monthFolders,
+    totalFiles: totalFiles,
+    sampleCounts: sampleCounts
+  };
+}
+
+// ---------------------
+// INTERNAL: Get Recent Execution Summary
+// ---------------------
+function getRecentExecutionSummary_() {
+  // Note: This is a simple text summary since we can't programmatically access execution logs
+  return 'Check Apps Script executions at: https://script.google.com/home/executions for detailed run history.';
 }
 
 // ---------------------
