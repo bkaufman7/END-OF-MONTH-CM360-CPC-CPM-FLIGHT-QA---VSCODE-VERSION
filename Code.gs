@@ -3645,15 +3645,20 @@ function processNextRawDataBatch_() {
         // Update last processed index after each thread completes
         lastProcessedEmailIndex = state.startIndex + i + 1;
         
-        // Save state after each thread (protects against mid-batch failures)
-        state.startIndex = lastProcessedEmailIndex;
-        state.emailsProcessed += batchEmailsProcessed;
-        state.filesSaved = (state.filesSaved || 0) + batchFilesSaved;
-        props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
-        
-        // Reset batch counters since we just saved
-        batchEmailsProcessed = 0;
-        batchFilesSaved = 0;
+        // Save state every 10 threads (balance between safety and performance)
+        // This protects against data loss while minimizing Script Properties writes
+        if ((i + 1) % 10 === 0 || i === threads.length - 1) {
+          state.startIndex = lastProcessedEmailIndex;
+          state.emailsProcessed += batchEmailsProcessed;
+          state.filesSaved = (state.filesSaved || 0) + batchFilesSaved;
+          props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+          
+          Logger.log(`State saved at index ${state.startIndex} (${batchEmailsProcessed} emails, ${batchFilesSaved} files in this checkpoint)`);
+          
+          // Reset batch counters since we just saved
+          batchEmailsProcessed = 0;
+          batchFilesSaved = 0;
+        }
         
       } catch (threadError) {
         Logger.log(`Error processing thread at index ${state.startIndex + i}: ${threadError}`);
