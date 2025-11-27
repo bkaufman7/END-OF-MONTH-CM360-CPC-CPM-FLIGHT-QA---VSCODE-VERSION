@@ -37,7 +37,6 @@ function onOpen() {
       .addItem("📦 Archive All Raw Data (Apr-Nov 2025)", "archiveAllRawData")
       .addItem("📊 View Raw Data Progress", "viewRawDataProgress")
       .addItem("🔄 Resume Raw Data Archive", "resumeRawDataArchive")
-      .addItem("🔄 Reset & Restart from April", "resetRawDataArchive")
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger", "createRawDataAutoResumeTrigger")
       .addItem("🛑 Delete Auto-Resume Trigger", "deleteRawDataAutoResumeTrigger")
@@ -3052,7 +3051,7 @@ function getMonthName_(month) {
 // ---------------------
 const RAW_DATA_FOLDER_ID = '1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN'; // Same root as other archives
 const RAW_DATA_SEARCH_SUBJECT = 'BKCM360 Global QA Check';
-const RAW_BATCH_SIZE = 500; // Process up to 500 emails per month (37 networks × 30 days = ~1,110 emails/month)
+const RAW_BATCH_SIZE = 20; // Process 20 emails per execution (conservative for large attachments)
 
 // ---------------------
 // MAIN: Archive All Raw Data (April-November 2025)
@@ -3064,10 +3063,8 @@ function archiveAllRawData() {
     'This will save ALL raw data files from April-November 2025.\n\n' +
     'All CSV/ZIP attachments will be extracted and saved.\n' +
     'Files will be organized by date, then categorized by network.\n\n' +
-    'Expected: ~8,880 emails (37 networks × 30 days × 8 months)\n' +
-    'Processing: 500 emails per month (~1,110/month total)\n' +
-    'Estimated time: 2-3 hours with auto-resume trigger\n' +
-    'Duplicates: Automatically skipped\n\n' +
+    'Expected: ~2,400 emails (8 months × 30 days)\n' +
+    'Processing: 20 emails per run (auto-resumes)\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
   );
@@ -3151,35 +3148,6 @@ function resumeRawDataArchive() {
   }
   
   processNextRawDataBatch_();
-}
-
-// ---------------------
-// Reset and Restart Archive from April (Clean Slate)
-// ---------------------
-function resetRawDataArchive() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.alert(
-    'Reset Raw Data Archive',
-    'This will RESET the archive and start fresh from April 2025.\n\n' +
-    'Current progress will be lost, but existing files in Drive will remain.\n' +
-    'Duplicate files will be skipped automatically.\n\n' +
-    'Continue?',
-    ui.ButtonSet.YES_NO
-  );
-  
-  if (response !== ui.Button.YES) {
-    return;
-  }
-  
-  // Clear the archive state
-  const props = PropertiesService.getScriptProperties();
-  props.deleteProperty('RAW_ARCHIVE_STATE');
-  
-  ui.alert(
-    'Archive Reset',
-    'Archive state cleared. Now run "Archive All Raw Data" to start fresh.',
-    ui.ButtonSet.OK
-  );
 }
 
 // ---------------------
@@ -3411,7 +3379,32 @@ function processSingleMonthRawData_(year, month) {
   
   const query = `subject:"${RAW_DATA_SEARCH_SUBJECT}" after:${Math.floor(startDate.getTime()/1000)} before:${Math.floor(endDate.getTime()/1000)}`;
   
-  const threads = GmailApp.search(query, 0, RAW_BATCH_SIZE);
+  // Gmail search pagination - get ALL threads for this month
+  let allThreads = [];
+  let startIndex = 0;
+  const maxPerBatch = 500; // Gmail's max
+  
+  while (true) {
+    const threads = GmailApp.search(query, startIndex, maxPerBatch);
+    if (threads.length === 0) break;
+    
+    allThreads = allThreads.concat(threads);
+    Logger.log(`Found ${threads.length} threads at index ${startIndex} for ${monthName} ${year}`);
+    
+    // If we got fewer than max, we've hit the end
+    if (threads.length < maxPerBatch) break;
+    
+    startIndex += maxPerBatch;
+    
+    // Safety: Gmail typically has a hard limit around 500-1000 threads per search
+    // For 37 networks × 30 days = 1,110 emails, we need 2-3 batches
+    if (startIndex > 2000) {
+      Logger.log(`⚠️ Warning: Hit pagination limit at ${startIndex} threads for ${monthName}`);
+      break;
+    }
+  }
+  
+  Logger.log(`Total threads found for ${monthName} ${year}: ${allThreads.length}`);
   
   let emailsProcessed = 0;
   let filesExtracted = 0;
@@ -3419,6 +3412,8 @@ function processSingleMonthRawData_(year, month) {
   
   // Get or create month folder: Raw Data/2025/04-April/
   const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
+  
+  for (const thread of allThreads) {
   
   for (const thread of threads) {
     const messages = thread.getMessages();
