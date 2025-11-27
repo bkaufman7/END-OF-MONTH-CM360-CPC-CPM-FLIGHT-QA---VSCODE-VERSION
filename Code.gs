@@ -3593,65 +3593,77 @@ function processNextRawDataBatch_() {
     let lastProcessedEmailIndex = state.startIndex; // Track actual progress
     
     for (let i = 0; i < threads.length; i++) {
-      const thread = threads[i];
-      const messages = thread.getMessages();
-      
-      for (const message of messages) {
-        const emailDate = message.getDate();
-        const year = emailDate.getFullYear();
-        const month = emailDate.getMonth() + 1; // JavaScript months are 0-indexed
-        const dateStr = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      try {
+        const thread = threads[i];
+        const messages = thread.getMessages();
         
-        // Get or create folder structure: Raw Data/2025/05-May/2025-05-15/
-        const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
-        const dateFolder = getOrCreateDateFolder_(monthFolder, dateStr);
-        
-        const attachments = message.getAttachments();
-        
-        for (const attachment of attachments) {
-          const filename = attachment.getName();
-          const lowerFilename = filename.toLowerCase();
+        for (const message of messages) {
+          const emailDate = message.getDate();
+          const year = emailDate.getFullYear();
+          const month = emailDate.getMonth() + 1; // JavaScript months are 0-indexed
+          const dateStr = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
           
-          // Handle ZIP files
-          if (lowerFilename.endsWith('.zip')) {
-            try {
-              const zipBlob = attachment.copyBlob();
-              const unzipped = Utilities.unzip(zipBlob);
-              
-              for (const file of unzipped) {
-                const unzippedName = file.getName().toLowerCase();
-                if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
-                  if (saveRawFileToDrive_(file, dateFolder, file.getName())) {
-                    batchFilesSaved++;
+          // Get or create folder structure: Raw Data/2025/05-May/2025-05-15/
+          const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
+          const dateFolder = getOrCreateDateFolder_(monthFolder, dateStr);
+          
+          const attachments = message.getAttachments();
+          
+          for (const attachment of attachments) {
+            const filename = attachment.getName();
+            const lowerFilename = filename.toLowerCase();
+            
+            // Handle ZIP files
+            if (lowerFilename.endsWith('.zip')) {
+              try {
+                const zipBlob = attachment.copyBlob();
+                const unzipped = Utilities.unzip(zipBlob);
+                
+                for (const file of unzipped) {
+                  const unzippedName = file.getName().toLowerCase();
+                  if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
+                    if (saveRawFileToDrive_(file, dateFolder, file.getName())) {
+                      batchFilesSaved++;
+                    }
                   }
                 }
+              } catch (error) {
+                Logger.log(`Error unzipping ${filename}: ${error}`);
               }
-            } catch (error) {
-              Logger.log(`Error unzipping ${filename}: ${error}`);
+            }
+            // Handle CSV and XLSX files directly
+            else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
+              if (saveRawFileToDrive_(attachment, dateFolder, filename)) {
+                batchFilesSaved++;
+              }
             }
           }
-          // Handle CSV and XLSX files directly
-          else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
-            if (saveRawFileToDrive_(attachment, dateFolder, filename)) {
-              batchFilesSaved++;
-            }
-          }
+          
+          batchEmailsProcessed++;
         }
         
-        batchEmailsProcessed++;
+        // Update last processed index after each thread completes
+        lastProcessedEmailIndex = state.startIndex + i + 1;
+        
+        // Save state after each thread (protects against mid-batch failures)
+        state.startIndex = lastProcessedEmailIndex;
+        state.emailsProcessed += batchEmailsProcessed;
+        state.filesSaved = (state.filesSaved || 0) + batchFilesSaved;
+        props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+        
+        // Reset batch counters since we just saved
+        batchEmailsProcessed = 0;
+        batchFilesSaved = 0;
+        
+      } catch (threadError) {
+        Logger.log(`Error processing thread at index ${state.startIndex + i}: ${threadError}`);
+        // Skip this thread and continue with next one
+        // State is already saved from previous successful thread
+        continue;
       }
-      
-      // Update last processed index after each thread completes
-      lastProcessedEmailIndex = state.startIndex + i + 1;
     }
     
-    // Update state - ONLY increment by what we actually processed
-    state.startIndex = lastProcessedEmailIndex;
-    state.emailsProcessed += batchEmailsProcessed;
-    state.filesSaved += batchFilesSaved;
-    props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
-    
-    Logger.log(`Batch complete: ${batchEmailsProcessed} emails, ${batchFilesSaved} files saved. Next index: ${state.startIndex}`);
+    Logger.log(`Batch complete. Next index: ${state.startIndex}`);
     
     // Send progress email every 500 emails
     if (state.emailsProcessed % 500 === 0) {
@@ -3669,13 +3681,21 @@ function processNextRawDataBatch_() {
   } catch (error) {
     Logger.log('Error processing batch: ' + error);
     
+    // Save current state before erroring out (preserve progress)
+    // Note: state updates happen in the main loop, so we need to check if we have partial progress
+    if (state) {
+      props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+      Logger.log(`State saved on error. Current index: ${state.startIndex}, Files saved: ${state.filesSaved}`);
+    }
+    
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
       subject: '⚠️ CM360 Raw Data Archive Error',
       htmlBody: `<h3>Raw Data Archive Error</h3>
         <p><strong>Error:</strong> ${error}</p>
-        <p><strong>Progress:</strong> ${state.emailsProcessed} emails, ${state.filesSaved} files saved</p>
-        <p><strong>Search index:</strong> ${state.startIndex}</p>
+        <p><strong>Progress:</strong> ${state ? state.emailsProcessed : 'unknown'} emails, ${state ? state.filesSaved : 'unknown'} files saved</p>
+        <p><strong>Search index:</strong> ${state ? state.startIndex : 'unknown'}</p>
+        <p><strong>Stack:</strong> ${error.stack || 'No stack trace'}</p>
         <p>Use "Resume Raw Data Archive" to continue.</p>`
     });
   }
