@@ -45,7 +45,8 @@ function onOpen() {
       .addItem("📅 Create Daily Progress Report (7:30 PM)", "createDailyProgressReportTrigger")
       .addItem("🛑 Delete Daily Progress Report", "deleteDailyProgressReportTrigger")
       .addSeparator()
-      .addItem("📂 Categorize Files by Network", "categorizeRawDataByNetwork"))
+      .addItem("📂 Categorize Files by Network", "categorizeRawDataByNetwork")
+      .addItem("🔍 Audit Archive Completeness", "auditRawDataArchive"))
     .addToUi();
 }
 
@@ -4144,6 +4145,363 @@ function renameFileWithNetworkName_(filename, networkId, networkName) {
   const newFilename = `${networkId}_${cleanNetworkName}_${nameWithoutExt}${extension}`;
   
   return newFilename;
+}
+
+/**
+ * AUDIT FUNCTION: Validates archive completeness by checking for missing files
+ * Compares expected files (Networks × Date Range) vs actual files in Drive
+ * Generates detailed report of gaps for manual retrieval
+ */
+function auditRawDataArchive() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      '🔍 Audit Raw Data Archive',
+      'This will scan your Drive to identify missing files.\n\n' +
+      'Expected files = All Networks × All Dates in archive period.\n' +
+      'This may take several minutes.\n\nProceed?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response !== ui.Button.YES) {
+      ui.alert('Audit cancelled.');
+      return;
+    }
+    
+    ui.alert('Starting audit... This will take a few minutes. Check your email for results.');
+    
+    // Get all networks
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var networksSheet = ss.getSheetByName('Networks');
+    if (!networksSheet) {
+      throw new Error('Networks sheet not found');
+    }
+    
+    var networkData = networksSheet.getDataRange().getValues();
+    var networkMap = {};
+    
+    for (var i = 1; i < networkData.length; i++) {
+      var networkId = String(networkData[i][0]).trim();
+      var networkName = String(networkData[i][1]).trim();
+      if (networkId && networkName) {
+        networkMap[networkId] = networkName;
+      }
+    }
+    
+    Logger.log('Found ' + Object.keys(networkMap).length + ' networks');
+    
+    // Scan Drive for existing files
+    var rootFolderId = PropertiesService.getScriptProperties().getProperty('RAW_DATA_FOLDER_ID');
+    if (!rootFolderId) {
+      throw new Error('Raw Data folder ID not found in Script Properties');
+    }
+    
+    var rootFolder = DriveApp.getFolderById(rootFolderId);
+    var existingFiles = scanAllFilesInDrive_(rootFolder);
+    
+    Logger.log('Found ' + existingFiles.size + ' unique date|network combinations in Drive');
+    
+    // Build expected file list from existing dates
+    var expectedFiles = buildExpectedFileList_(rootFolder, networkMap);
+    
+    Logger.log('Expected ' + expectedFiles.length + ' files based on date folders');
+    
+    // Compare and identify gaps
+    var missingFiles = [];
+    var foundFiles = [];
+    
+    for (var i = 0; i < expectedFiles.length; i++) {
+      var expected = expectedFiles[i];
+      var key = expected.date + '|' + expected.networkId;
+      
+      if (existingFiles.has(key)) {
+        foundFiles.push(expected);
+      } else {
+        missingFiles.push(expected);
+      }
+    }
+    
+    // Send detailed audit report
+    sendAuditReport_(networkMap, expectedFiles.length, foundFiles.length, missingFiles);
+    
+    ui.alert(
+      '✅ Audit Complete',
+      'Found: ' + foundFiles.length + ' files\n' +
+      'Missing: ' + missingFiles.length + ' files\n\n' +
+      'Detailed report sent to your email.',
+      ui.ButtonSet.OK
+    );
+    
+  } catch (error) {
+    Logger.log('Error in auditRawDataArchive: ' + error);
+    SpreadsheetApp.getUi().alert('Error: ' + error.toString());
+  }
+}
+
+/**
+ * Scans all files in Drive and returns a Set of date|networkId keys
+ */
+function scanAllFilesInDrive_(rootFolder) {
+  var fileKeys = new Set();
+  
+  // Check both date-based structure and network-based structure
+  var yearFolders = rootFolder.getFolders();
+  
+  while (yearFolders.hasNext()) {
+    var yearFolder = yearFolders.next();
+    var yearName = yearFolder.getName();
+    
+    // Skip Networks folder (that's categorized data)
+    if (yearName === 'Networks') {
+      Logger.log('Skipping Networks folder during audit');
+      continue;
+    }
+    
+    // Process year folders (2024, 2025, etc.)
+    if (/^\d{4}$/.test(yearName)) {
+      var monthFolders = yearFolder.getFolders();
+      
+      while (monthFolders.hasNext()) {
+        var monthFolder = monthFolders.next();
+        var dateFolders = monthFolder.getFolders();
+        
+        while (dateFolders.hasNext()) {
+          var dateFolder = dateFolders.next();
+          var dateName = dateFolder.getName(); // e.g., "2025-05-15"
+          
+          var files = dateFolder.getFiles();
+          while (files.hasNext()) {
+            var file = files.next();
+            var fileName = file.getName();
+            
+            // Extract network ID from filename
+            var networkMap = getNetworkMap_();
+            var networkId = extractNetworkIdFromFilename_(fileName, networkMap);
+            if (networkId) {
+              var key = dateName + '|' + networkId;
+              fileKeys.add(key);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return fileKeys;
+}
+
+/**
+ * Helper to get network map for audit functions
+ */
+function getNetworkMap_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var networksSheet = ss.getSheetByName('Networks');
+  if (!networksSheet) {
+    return {};
+  }
+  
+  var networkData = networksSheet.getDataRange().getValues();
+  var networkMap = {};
+  
+  for (var i = 1; i < networkData.length; i++) {
+    var networkId = String(networkData[i][0]).trim();
+    var networkName = String(networkData[i][1]).trim();
+    if (networkId && networkName) {
+      networkMap[networkId] = networkName;
+    }
+  }
+  
+  return networkMap;
+}
+
+/**
+ * Builds expected file list based on actual date folders in Drive
+ */
+function buildExpectedFileList_(rootFolder, networkMap) {
+  var expectedFiles = [];
+  var dates = new Set();
+  
+  // Scan for all date folders
+  var yearFolders = rootFolder.getFolders();
+  
+  while (yearFolders.hasNext()) {
+    var yearFolder = yearFolders.next();
+    var yearName = yearFolder.getName();
+    
+    if (yearName === 'Networks' || !/^\d{4}$/.test(yearName)) {
+      continue;
+    }
+    
+    var monthFolders = yearFolder.getFolders();
+    
+    while (monthFolders.hasNext()) {
+      var monthFolder = monthFolders.next();
+      var dateFolders = monthFolder.getFolders();
+      
+      while (dateFolders.hasNext()) {
+        var dateFolder = dateFolders.next();
+        dates.add(dateFolder.getName()); // e.g., "2025-05-15"
+      }
+    }
+  }
+  
+  Logger.log('Found ' + dates.size + ' unique dates in Drive');
+  
+  // For each date × network, expect a file
+  var dateArray = Array.from(dates);
+  var networkIds = Object.keys(networkMap);
+  
+  for (var i = 0; i < dateArray.length; i++) {
+    for (var j = 0; j < networkIds.length; j++) {
+      expectedFiles.push({
+        date: dateArray[i],
+        networkId: networkIds[j],
+        networkName: networkMap[networkIds[j]]
+      });
+    }
+  }
+  
+  return expectedFiles;
+}
+
+/**
+ * Sends detailed audit report via email
+ */
+function sendAuditReport_(networkMap, expectedCount, foundCount, missingFiles) {
+  try {
+    var missingByNetwork = {};
+    var missingByDate = {};
+    
+    // Group missing files by network and date
+    for (var i = 0; i < missingFiles.length; i++) {
+      var missing = missingFiles[i];
+      
+      // By network
+      if (!missingByNetwork[missing.networkId]) {
+        missingByNetwork[missing.networkId] = {
+          name: missing.networkName,
+          dates: []
+        };
+      }
+      missingByNetwork[missing.networkId].dates.push(missing.date);
+      
+      // By date
+      if (!missingByDate[missing.date]) {
+        missingByDate[missing.date] = [];
+      }
+      missingByDate[missing.date].push(missing.networkId + ' - ' + missing.networkName);
+    }
+    
+    // Sort networks by most missing files
+    var networkBreakdown = Object.keys(missingByNetwork).map(function(netId) {
+      return {
+        id: netId,
+        name: missingByNetwork[netId].name,
+        missingCount: missingByNetwork[netId].dates.length,
+        dates: missingByNetwork[netId].dates.sort()
+      };
+    }).sort(function(a, b) { return b.missingCount - a.missingCount; });
+    
+    // Sort dates
+    var dateBreakdown = Object.keys(missingByDate).sort().map(function(date) {
+      return {
+        date: date,
+        networks: missingByDate[date].sort()
+      };
+    });
+    
+    var htmlBody = `
+      <div style="font-family: Arial, sans-serif; max-width: 800px;">
+        <h2 style="color: #1a73e8;">🔍 Raw Data Archive Audit Report</h2>
+        <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+        
+        <h3>📊 Summary</h3>
+        <table style="border-collapse: collapse; width: 100%;">
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Expected Files</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${expectedCount}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Files Found</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd; color: green;">${foundCount} (${((foundCount / expectedCount) * 100).toFixed(1)}%)</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Files Missing</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd; color: ${missingFiles.length > 0 ? 'red' : 'green'};">${missingFiles.length} (${((missingFiles.length / expectedCount) * 100).toFixed(1)}%)</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Networks</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${Object.keys(networkMap).length}</td>
+          </tr>
+          <tr style="background-color: #f0f0f0;">
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Networks with Gaps</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${Object.keys(missingByNetwork).length}</td>
+          </tr>
+        </table>
+        
+        ${missingFiles.length > 0 ? `
+        <h3 style="color: #d93025;">⚠️ Missing Files by Network</h3>
+        <p style="color: #666; font-size: 12px;">Networks sorted by most missing files (showing top 20):</p>
+        <table style="border-collapse: collapse; width: 100%; font-size: 12px;">
+          <tr style="background-color: #f0f0f0;">
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Missing</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Sample Dates</th>
+          </tr>
+          ${networkBreakdown.slice(0, 20).map((net, i) => `
+            <tr${i % 2 === 0 ? ' style="background-color: #f9f9f9;"' : ''}>
+              <td style="padding: 6px; border: 1px solid #ddd;">${net.id} - ${net.name}</td>
+              <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">${net.missingCount}</td>
+              <td style="padding: 6px; border: 1px solid #ddd; font-size: 11px;">${net.dates.slice(0, 5).join(', ')}${net.dates.length > 5 ? '...' : ''}</td>
+            </tr>
+          `).join('')}
+        </table>
+        ${networkBreakdown.length > 20 ? `<p style="color: #666; font-size: 12px;">...and ${networkBreakdown.length - 20} more networks with missing files</p>` : ''}
+        
+        <h3 style="color: #d93025;">📅 Missing Files by Date</h3>
+        <p style="color: #666; font-size: 12px;">Dates with missing files (showing first 10):</p>
+        <table style="border-collapse: collapse; width: 100%; font-size: 12px;">
+          <tr style="background-color: #f0f0f0;">
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Date</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Networks Missing</th>
+          </tr>
+          ${dateBreakdown.slice(0, 10).map((d, i) => `
+            <tr${i % 2 === 0 ? ' style="background-color: #f9f9f9;"' : ''}>
+              <td style="padding: 6px; border: 1px solid #ddd;">${d.date}</td>
+              <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">${d.networks.length}</td>
+            </tr>
+          `).join('')}
+        </table>
+        ${dateBreakdown.length > 10 ? `<p style="color: #666; font-size: 12px;">...and ${dateBreakdown.length - 10} more dates</p>` : ''}
+        
+        <h3>🔧 Next Steps to Fill Gaps</h3>
+        <ol>
+          <li><strong>Search Gmail for missing dates:</strong> <code>subject:"BKCM360 Global QA Check" after:YYYY-MM-DD before:YYYY-MM-DD</code></li>
+          <li><strong>Download missing CSV/ZIP files</strong> from those emails manually</li>
+          <li><strong>Upload to Drive:</strong> Place in correct folders (Raw Data/YYYY/Month/YYYY-MM-DD/)</li>
+          <li><strong>Re-run categorization:</strong> Organize new files by network</li>
+          <li><strong>Re-audit:</strong> Run this audit again to verify gaps are filled</li>
+        </ol>
+        ` : `
+        <h3 style="color: #34a853;">✅ Archive Complete!</h3>
+        <p>All expected files are present in your Drive. No gaps detected.</p>
+        <p style="color: #666; font-size: 12px;">Note: This assumes 1 file per network per date. Some networks may legitimately have no data for certain dates.</p>
+        `}
+        
+        <hr style="border: 1px solid #ddd; margin: 20px 0;">
+        <p style="color: #666; font-size: 12px;">This audit scans all date folders and expects 1 file per network per date. Files saved in network folders (categorized) are also counted.</p>
+      </div>
+    `;
+    
+    MailApp.sendEmail({
+      to: Session.getActiveUser().getEmail(),
+      subject: '[CM360 Archive] Audit Report - ' + (missingFiles.length > 0 ? missingFiles.length + ' Files Missing' : 'Complete'),
+      htmlBody: htmlBody
+    });
+    
+  } catch (error) {
+    Logger.log('Error sending audit report: ' + error);
+  }
 }
 
 // =====================================================================================================================
