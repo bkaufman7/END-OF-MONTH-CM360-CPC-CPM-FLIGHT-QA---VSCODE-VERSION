@@ -42,6 +42,9 @@ function onOpen() {
       .addItem("⏰ Create Auto-Resume Trigger", "createRawDataAutoResumeTrigger")
       .addItem("🛑 Delete Auto-Resume Trigger", "deleteRawDataAutoResumeTrigger")
       .addSeparator()
+      .addItem("📅 Create Daily Progress Report (7:30 PM)", "createDailyProgressReportTrigger")
+      .addItem("🛑 Delete Daily Progress Report", "deleteDailyProgressReportTrigger")
+      .addSeparator()
       .addItem("📂 Categorize Files by Network", "categorizeRawDataByNetwork"))
     .addToUi();
 }
@@ -3399,6 +3402,107 @@ function deleteRawDataAutoResumeTrigger() {
     `Removed ${deleted} trigger(s). Archive will no longer auto-resume.`,
     ui.ButtonSet.OK
   );
+}
+
+// ---------------------
+// Create Daily Evening Progress Report Trigger (7:30 PM)
+// ---------------------
+function createDailyProgressReportTrigger() {
+  // Delete any existing triggers for this function first
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    if (trigger.getHandlerFunction() === 'sendDailyProgressReport') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  }
+  
+  // Create new trigger: Daily at 7:30 PM
+  ScriptApp.newTrigger('sendDailyProgressReport')
+    .timeBased()
+    .atHour(19) // 7 PM in 24-hour format
+    .everyDays(1)
+    .create();
+  
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(
+    'Daily Progress Report Trigger Created',
+    'You will receive a detailed progress email every evening at 7:30 PM.\n\n' +
+    'This will continue daily until you delete the trigger.\n\n' +
+    'Use "Delete Daily Progress Report Trigger" to stop.',
+    ui.ButtonSet.OK
+  );
+}
+
+// ---------------------
+// Delete Daily Evening Progress Report Trigger
+// ---------------------
+function deleteDailyProgressReportTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let deleted = 0;
+  
+  for (const trigger of triggers) {
+    if (trigger.getHandlerFunction() === 'sendDailyProgressReport') {
+      ScriptApp.deleteTrigger(trigger);
+      deleted++;
+    }
+  }
+  
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(
+    'Daily Progress Report Trigger Deleted',
+    `Removed ${deleted} trigger(s). No more daily progress emails.`,
+    ui.ButtonSet.OK
+  );
+}
+
+// ---------------------
+// Send Daily Progress Report (Called by Trigger)
+// ---------------------
+function sendDailyProgressReport() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  
+  // If no archive in progress or completed, send notification
+  if (!stateJson) {
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '📊 CM360 Archive - No Active Archive',
+      htmlBody: `
+        <h3>Daily Progress Report</h3>
+        <p>No archive is currently in progress or no state found.</p>
+        <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+        <p>If you expected an archive to be running, check the Scripts and Triggers.</p>
+      `
+    });
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  // If completed, send final summary and delete this trigger
+  if (state.status === 'completed') {
+    MailApp.sendEmail({
+      to: 'platformsolutionsadopshorizon@gmail.com',
+      subject: '✅ CM360 Archive COMPLETE - Daily Report Trigger Stopping',
+      htmlBody: `
+        <h2 style="color: #00cc00;">✅ Archive Complete!</h2>
+        <p>The raw data archive has finished successfully.</p>
+        <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
+        <p><strong>Total files saved:</strong> ${state.filesSaved}</p>
+        <p><strong>Completed:</strong> ${state.endTime ? new Date(state.endTime).toLocaleString() : 'Recently'}</p>
+        <hr>
+        <p>Daily progress report trigger will now stop automatically.</p>
+        <p><strong>Next step:</strong> Run "Categorize Files by Network" to organize by network folders.</p>
+      `
+    });
+    
+    // Auto-delete this daily trigger since archive is done
+    deleteDailyProgressReportTrigger();
+    return;
+  }
+  
+  // Otherwise, send the detailed progress report
+  emailDetailedProgressReport();
 }
 
 // ---------------------
