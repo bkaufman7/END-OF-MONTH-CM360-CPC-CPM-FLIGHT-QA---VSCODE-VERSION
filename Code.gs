@@ -4606,6 +4606,14 @@ function sendAuditReport_(networkMap, expectedCount, foundCount, missingFiles) {
 // ======================================= GAP-FILLING ARCHIVE FUNCTIONS ===============================================
 // =====================================================================================================================
 
+// ---------------------
+// HELPER: Check if file exists in folder
+// ---------------------
+function fileExistsInFolder_(folder, filename) {
+  const files = folder.getFilesByName(filename);
+  return files.hasNext();
+}
+
 /**
  * Archive only missing dates (gap-filling)
  * Identifies which dates are missing from Drive and archives only those
