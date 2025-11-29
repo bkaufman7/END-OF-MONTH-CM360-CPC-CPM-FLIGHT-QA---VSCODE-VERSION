@@ -4613,14 +4613,14 @@ function sendAuditReport_(networkMap, expectedCount, foundCount, missingFiles) {
 function archiveRawDataGapFill() {
   const ui = SpreadsheetApp.getUi();
   
-  // Step 1: Scan existing Drive data to find what's already archived
   const result = ui.alert(
     '🔍 Gap-Filling Archive',
-    'This will:\n\n' +
-    '1. Scan your existing Drive data (3,729 files)\n' +
-    '2. Identify missing dates from May 1 to today\n' +
-    '3. Archive ONLY the missing dates\n\n' +
-    'This is much faster than re-archiving everything!\n\n' +
+    'This will archive ONLY the missing dates from May 1 to today.\n\n' +
+    'Based on your existing data, you have ~90 missing dates.\n\n' +
+    'Estimated:\n' +
+    '• ~1,620 emails to process\n' +
+    '• ~2-3 hours duration\n\n' +
+    'The system will skip dates that already have data.\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
   );
@@ -4629,61 +4629,29 @@ function archiveRawDataGapFill() {
     return;
   }
   
-  ui.alert(
-    '⏱️ Scanning Existing Data',
-    'Scanning your Drive folder to identify existing dates...\n\n' +
-    'This may take 1-2 minutes.',
-    ui.ButtonSet.OK
-  );
-  
-  // Scan existing data
-  const existingDates = scanExistingRawDataDates_();
-  
-  // Generate list of all dates from May 1, 2025 to today
+  // Generate list of ALL dates from May 1, 2025 to today
   const allDates = generateDateRange_(new Date(2025, 4, 1), new Date()); // May is month 4 (0-indexed)
   
-  // Find missing dates
-  const missingDates = allDates.filter(date => {
-    const dateStr = formatDateForFolder_(date);
-    return !existingDates.has(dateStr);
-  });
-  
-  if (missingDates.length === 0) {
-    ui.alert(
-      '✅ Archive Complete!',
-      'No missing dates found. Your archive is complete from May 1 to today!',
-      ui.ButtonSet.OK
-    );
-    return;
-  }
-  
-  // Show what will be archived
-  const confirmResult = ui.alert(
-    '📋 Missing Dates Found',
-    `Found ${missingDates.length} missing dates to archive:\n\n` +
-    `First missing: ${formatDateForDisplay_(missingDates[0])}\n` +
-    `Last missing: ${formatDateForDisplay_(missingDates[missingDates.length - 1])}\n\n` +
-    `Estimated emails: ~${missingDates.length * 18} (avg 18/day)\n` +
-    `Estimated time: ~${Math.ceil(missingDates.length / 40)} hours\n\n` +
-    'Start gap-filling archive?',
-    ui.ButtonSet.YES_NO
+  ui.alert(
+    '✅ Ready to Start',
+    `Will check ${allDates.length} dates from May 1 to today.\n\n` +
+    'Dates that already have files will be skipped automatically.\n\n' +
+    'Click OK to start.',
+    ui.ButtonSet.OK
   );
-  
-  if (confirmResult !== ui.Button.YES) {
-    return;
-  }
   
   // Initialize state
   const props = PropertiesService.getScriptProperties();
   const state = {
     status: 'running',
     mode: 'gap-fill',
-    missingDates: missingDates.map(d => formatDateForFolder_(d)),
+    allDates: allDates.map(d => formatDateForFolder_(d)),
     currentDateIndex: 0,
     startTime: new Date().toISOString(),
     emailsProcessed: 0,
     filesSaved: 0,
-    datesCompleted: 0
+    datesCompleted: 0,
+    datesSkipped: 0
   };
   
   props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
@@ -4693,8 +4661,8 @@ function archiveRawDataGapFill() {
   
   ui.alert(
     '✅ Gap-Fill Archive Started',
-    `Processing ${missingDates.length} missing dates.\n\n` +
-    'Create an Auto-Resume trigger to continue if it times out?',
+    `Processing ${allDates.length} dates (will skip existing).\n\n` +
+    'Create an Auto-Resume trigger to continue automatically every 10 minutes.',
     ui.ButtonSet.OK
   );
 }
@@ -4722,18 +4690,30 @@ function processGapFillBatch_() {
   const startTime = new Date();
   const MAX_EXECUTION_MS = 5 * 60 * 1000; // 5 minutes
   
-  Logger.log(`Gap-fill batch starting at date index ${state.currentDateIndex}/${state.missingDates.length}`);
+  Logger.log(`Gap-fill batch starting at date index ${state.currentDateIndex}/${state.allDates.length}`);
   
   // Process dates until we run out of time
-  while (state.currentDateIndex < state.missingDates.length) {
+  while (state.currentDateIndex < state.allDates.length) {
     const elapsed = new Date() - startTime;
     if (elapsed > MAX_EXECUTION_MS) {
       Logger.log('Time limit reached, saving progress...');
       break;
     }
     
-    const dateStr = state.missingDates[state.currentDateIndex];
+    const dateStr = state.allDates[state.currentDateIndex];
     const date = parseFolderDateString_(dateStr);
+    
+    // Check if this date already has data (skip if so)
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    
+    if (dateAlreadyHasFiles_(year, month, date)) {
+      Logger.log(`Skipping ${dateStr} - already has files`);
+      state.datesSkipped++;
+      state.currentDateIndex++;
+      props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+      continue;
+    }
     
     Logger.log(`Processing missing date: ${dateStr}`);
     
@@ -4752,7 +4732,7 @@ function processGapFillBatch_() {
   }
   
   // Check if complete
-  if (state.currentDateIndex >= state.missingDates.length) {
+  if (state.currentDateIndex >= state.allDates.length) {
     state.status = 'completed';
     state.completedTime = new Date().toISOString();
     props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
@@ -4762,7 +4742,8 @@ function processGapFillBatch_() {
     
     Logger.log('✅ Gap-fill archive COMPLETED!');
   } else {
-    Logger.log(`Progress: ${state.currentDateIndex}/${state.missingDates.length} dates (${((state.currentDateIndex/state.missingDates.length)*100).toFixed(1)}%)`);
+    const progress = ((state.currentDateIndex/state.allDates.length)*100).toFixed(1);
+    Logger.log(`Progress: ${state.currentDateIndex}/${state.allDates.length} dates checked (${progress}%) - ${state.datesCompleted} archived, ${state.datesSkipped} skipped`);
   }
 }
 
@@ -4850,6 +4831,32 @@ function archiveSingleDate_(date) {
     emailsProcessed: emailsProcessed,
     filesSaved: filesSaved
   };
+}
+
+/**
+ * Check if a specific date already has files in Drive
+ */
+function dateAlreadyHasFiles_(year, month, date) {
+  try {
+    const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
+    const dateStr = formatDateForFolder_(date);
+    
+    // Check if date folder exists and has files
+    const dateFolders = monthFolder.getFoldersByName(dateStr);
+    if (!dateFolders.hasNext()) {
+      return false; // Folder doesn't exist
+    }
+    
+    const dateFolder = dateFolders.next();
+    const files = dateFolder.getFiles();
+    
+    // Return true if folder has at least one file
+    return files.hasNext();
+    
+  } catch (error) {
+    Logger.log(`Error checking if ${formatDateForFolder_(date)} has files: ${error}`);
+    return false; // Assume doesn't exist on error
+  }
 }
 
 /**
