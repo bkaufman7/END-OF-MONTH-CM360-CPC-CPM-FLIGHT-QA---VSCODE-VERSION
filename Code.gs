@@ -4597,6 +4597,510 @@ function sendAuditReport_(networkMap, expectedCount, foundCount, missingFiles) {
 }
 
 // =====================================================================================================================
+// ======================================= GAP-FILLING ARCHIVE FUNCTIONS ===============================================
+// =====================================================================================================================
+
+/**
+ * Archive only missing dates (gap-filling)
+ * Identifies which dates are missing from Drive and archives only those
+ */
+function archiveRawDataGapFill() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Step 1: Scan existing Drive data to find what's already archived
+  const result = ui.alert(
+    '🔍 Gap-Filling Archive',
+    'This will:\n\n' +
+    '1. Scan your existing Drive data (3,729 files)\n' +
+    '2. Identify missing dates from May 1 to today\n' +
+    '3. Archive ONLY the missing dates\n\n' +
+    'This is much faster than re-archiving everything!\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (result !== ui.Button.YES) {
+    return;
+  }
+  
+  ui.alert(
+    '⏱️ Scanning Existing Data',
+    'Scanning your Drive folder to identify existing dates...\n\n' +
+    'This may take 1-2 minutes.',
+    ui.ButtonSet.OK
+  );
+  
+  // Scan existing data
+  const existingDates = scanExistingRawDataDates_();
+  
+  // Generate list of all dates from May 1, 2025 to today
+  const allDates = generateDateRange_(new Date(2025, 4, 1), new Date()); // May is month 4 (0-indexed)
+  
+  // Find missing dates
+  const missingDates = allDates.filter(date => {
+    const dateStr = formatDateForFolder_(date);
+    return !existingDates.has(dateStr);
+  });
+  
+  if (missingDates.length === 0) {
+    ui.alert(
+      '✅ Archive Complete!',
+      'No missing dates found. Your archive is complete from May 1 to today!',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+  
+  // Show what will be archived
+  const confirmResult = ui.alert(
+    '📋 Missing Dates Found',
+    `Found ${missingDates.length} missing dates to archive:\n\n` +
+    `First missing: ${formatDateForDisplay_(missingDates[0])}\n` +
+    `Last missing: ${formatDateForDisplay_(missingDates[missingDates.length - 1])}\n\n` +
+    `Estimated emails: ~${missingDates.length * 18} (avg 18/day)\n` +
+    `Estimated time: ~${Math.ceil(missingDates.length / 40)} hours\n\n` +
+    'Start gap-filling archive?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirmResult !== ui.Button.YES) {
+    return;
+  }
+  
+  // Initialize state
+  const props = PropertiesService.getScriptProperties();
+  const state = {
+    status: 'running',
+    mode: 'gap-fill',
+    missingDates: missingDates.map(d => formatDateForFolder_(d)),
+    currentDateIndex: 0,
+    startTime: new Date().toISOString(),
+    emailsProcessed: 0,
+    filesSaved: 0,
+    datesCompleted: 0
+  };
+  
+  props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+  
+  // Start processing
+  processGapFillBatch_();
+  
+  ui.alert(
+    '✅ Gap-Fill Archive Started',
+    `Processing ${missingDates.length} missing dates.\n\n` +
+    'Create an Auto-Resume trigger to continue if it times out?',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Process one batch of gap-fill archive
+ * Processes emails for a few missing dates at a time
+ */
+function processGapFillBatch_() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  
+  if (!stateJson) {
+    Logger.log('No gap-fill state found');
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  if (state.mode !== 'gap-fill') {
+    Logger.log('Not in gap-fill mode');
+    return;
+  }
+  
+  const startTime = new Date();
+  const MAX_EXECUTION_MS = 5 * 60 * 1000; // 5 minutes
+  
+  Logger.log(`Gap-fill batch starting at date index ${state.currentDateIndex}/${state.missingDates.length}`);
+  
+  // Process dates until we run out of time
+  while (state.currentDateIndex < state.missingDates.length) {
+    const elapsed = new Date() - startTime;
+    if (elapsed > MAX_EXECUTION_MS) {
+      Logger.log('Time limit reached, saving progress...');
+      break;
+    }
+    
+    const dateStr = state.missingDates[state.currentDateIndex];
+    const date = parseFolderDateString_(dateStr);
+    
+    Logger.log(`Processing missing date: ${dateStr}`);
+    
+    // Search for emails on this specific date
+    const result = archiveSingleDate_(date);
+    
+    state.emailsProcessed += result.emailsProcessed;
+    state.filesSaved += result.filesSaved;
+    state.datesCompleted++;
+    state.currentDateIndex++;
+    
+    // Save progress after each date
+    props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+    
+    Logger.log(`Completed ${dateStr}: ${result.emailsProcessed} emails, ${result.filesSaved} files`);
+  }
+  
+  // Check if complete
+  if (state.currentDateIndex >= state.missingDates.length) {
+    state.status = 'completed';
+    state.completedTime = new Date().toISOString();
+    props.setProperty('RAW_ARCHIVE_STATE', JSON.stringify(state));
+    
+    // Send completion email
+    sendGapFillCompletionEmail_(state);
+    
+    Logger.log('✅ Gap-fill archive COMPLETED!');
+  } else {
+    Logger.log(`Progress: ${state.currentDateIndex}/${state.missingDates.length} dates (${((state.currentDateIndex/state.missingDates.length)*100).toFixed(1)}%)`);
+  }
+}
+
+/**
+ * Archive emails for a single specific date
+ */
+function archiveSingleDate_(date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  
+  // Format date for Gmail search: "2025/05/12"
+  const searchDate = `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+  
+  // Search for emails on this specific date
+  const query = `subject:"BKCM360 Global QA Check" after:${searchDate} before:${getNextDay_(searchDate)}`;
+  
+  Logger.log(`Searching: ${query}`);
+  
+  const threads = GmailApp.search(query, 0, 10); // Max 10 threads per day (safety)
+  
+  let emailsProcessed = 0;
+  let filesSaved = 0;
+  
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    
+    for (const message of messages) {
+      const subject = message.getSubject();
+      const messageDate = message.getDate();
+      
+      // Double-check the date matches (Gmail search can be fuzzy)
+      if (messageDate.getFullYear() !== year || 
+          messageDate.getMonth() + 1 !== month || 
+          messageDate.getDate() !== day) {
+        continue;
+      }
+      
+      // Get folder for this date
+      const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
+      const dateFolder = getOrCreateRawDataDateFolder_(monthFolder, date);
+      
+      // Process attachments
+      const attachments = message.getAttachments();
+      
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        const lowerFilename = filename.toLowerCase();
+        
+        // Skip if already exists (duplicate protection)
+        if (fileExistsInFolder_(dateFolder, filename)) {
+          Logger.log(`Skipping duplicate: ${filename}`);
+          continue;
+        }
+        
+        // Handle ZIP files
+        if (lowerFilename.endsWith('.zip')) {
+          const zipBlob = attachment.copyBlob();
+          const unzipped = Utilities.unzip(zipBlob);
+          
+          for (const file of unzipped) {
+            const unzippedName = file.getName().toLowerCase();
+            if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
+              if (!fileExistsInFolder_(dateFolder, file.getName())) {
+                dateFolder.createFile(file);
+                filesSaved++;
+                Logger.log(`Saved from ZIP: ${file.getName()}`);
+              }
+            }
+          }
+        }
+        // Handle CSV and XLSX files
+        else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
+          dateFolder.createFile(attachment.copyBlob());
+          filesSaved++;
+          Logger.log(`Saved: ${filename}`);
+        }
+      }
+      
+      emailsProcessed++;
+    }
+  }
+  
+  return {
+    emailsProcessed: emailsProcessed,
+    filesSaved: filesSaved
+  };
+}
+
+/**
+ * Scan existing Drive data to find which dates already exist
+ * Returns a Set of date strings like "2025-05-12"
+ */
+function scanExistingRawDataDates_() {
+  const existingDates = new Set();
+  
+  try {
+    const folderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+    const rawDataFolder = DriveApp.getFolderById(folderId);
+    
+    // Loop through year folders
+    const yearFolders = rawDataFolder.getFolders();
+    while (yearFolders.hasNext()) {
+      const yearFolder = yearFolders.next();
+      
+      // Loop through month folders
+      const monthFolders = yearFolder.getFolders();
+      while (monthFolders.hasNext()) {
+        const monthFolder = monthFolders.next();
+        
+        // Loop through day folders
+        const dayFolders = monthFolder.getFolders();
+        while (dayFolders.hasNext()) {
+          const dayFolder = dayFolders.next();
+          const dayName = dayFolder.getName(); // e.g., "2025-05-12"
+          existingDates.add(dayName);
+        }
+      }
+    }
+    
+    Logger.log(`Found ${existingDates.size} existing dates in Drive`);
+    
+  } catch (error) {
+    Logger.log('Error scanning existing dates: ' + error);
+  }
+  
+  return existingDates;
+}
+
+/**
+ * Generate array of dates between start and end (inclusive)
+ */
+function generateDateRange_(startDate, endDate) {
+  const dates = [];
+  const current = new Date(startDate);
+  
+  while (current <= endDate) {
+    dates.push(new Date(current));
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return dates;
+}
+
+/**
+ * Format date for folder name: "2025-05-12"
+ */
+function formatDateForFolder_(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Format date for display: "May 12, 2025"
+ */
+function formatDateForDisplay_(date) {
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+/**
+ * Parse folder date string back to Date object
+ */
+function parseFolderDateString_(dateStr) {
+  const parts = dateStr.split('-');
+  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+}
+
+/**
+ * Get next day in Gmail search format
+ */
+function getNextDay_(gmailDateStr) {
+  const parts = gmailDateStr.split('/');
+  const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  date.setDate(date.getDate() + 1);
+  
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  
+  return `${year}/${month}/${day}`;
+}
+
+/**
+ * Send completion email for gap-fill archive
+ */
+function sendGapFillCompletionEmail_(state) {
+  const startTime = new Date(state.startTime);
+  const endTime = new Date(state.completedTime);
+  const duration = endTime - startTime;
+  const hours = Math.floor(duration / (1000 * 60 * 60));
+  const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
+  
+  MailApp.sendEmail({
+    to: 'platformsolutionsadopshorizon@gmail.com',
+    subject: '✅ CM360 Gap-Fill Archive COMPLETED',
+    htmlBody: `
+      <h2>🎉 Gap-Fill Archive Complete!</h2>
+      
+      <h3>📊 Summary</h3>
+      <ul>
+        <li><strong>Missing Dates Filled:</strong> ${state.datesCompleted}</li>
+        <li><strong>Emails Processed:</strong> ${state.emailsProcessed}</li>
+        <li><strong>Files Saved:</strong> ${state.filesSaved}</li>
+        <li><strong>Duration:</strong> ${hours}h ${minutes}m</li>
+      </ul>
+      
+      <h3>✅ Next Steps</h3>
+      <ol>
+        <li>Delete Auto-Resume trigger (if created)</li>
+        <li>Run audit to verify all dates present</li>
+        <li>Categorize by network</li>
+        <li>Begin ROI analysis</li>
+      </ol>
+      
+      <p><strong>Archive Start:</strong> ${startTime.toLocaleString()}</p>
+      <p><strong>Archive End:</strong> ${endTime.toLocaleString()}</p>
+    `
+  });
+}
+
+/**
+ * DIAGNOSTIC: Check what's actually in the Raw Data Drive folder by FOLDER ID
+ * Checks nested structure: Raw Data/Year/Month/Day/files
+ */
+function checkDriveRawDataFolder() {
+  try {
+    // Use the specific folder ID from the user's Drive link
+    const folderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+    const rawDataFolder = DriveApp.getFolderById(folderId);
+    
+    let totalFiles = 0;
+    let totalDays = 0;
+    let folderStructure = {};
+    
+    Logger.log('=== RAW DATA FOLDER ANALYSIS ===');
+    Logger.log('Folder ID: ' + folderId);
+    Logger.log('Folder Name: ' + rawDataFolder.getName());
+    
+    // Check year folders
+    const yearFolders = rawDataFolder.getFolders();
+    while (yearFolders.hasNext()) {
+      const yearFolder = yearFolders.next();
+      const yearName = yearFolder.getName();
+      folderStructure[yearName] = {};
+      
+      Logger.log('\n📅 Year: ' + yearName);
+      
+      // Check month folders
+      const monthFolders = yearFolder.getFolders();
+      while (monthFolders.hasNext()) {
+        const monthFolder = monthFolders.next();
+        const monthName = monthFolder.getName();
+        
+        let monthFileCount = 0;
+        let monthDayCount = 0;
+        let dayFolders = [];
+        
+        // Check for DAY subfolders within each month
+        const dayFoldersIterator = monthFolder.getFolders();
+        while (dayFoldersIterator.hasNext()) {
+          const dayFolder = dayFoldersIterator.next();
+          const dayName = dayFolder.getName();
+          dayFolders.push(dayName);
+          
+          // Count files in this day folder
+          const files = dayFolder.getFiles();
+          let dayFileCount = 0;
+          while (files.hasNext()) {
+            files.next();
+            dayFileCount++;
+            monthFileCount++;
+            totalFiles++;
+          }
+          
+          if (dayFileCount > 0) {
+            monthDayCount++;
+            totalDays++;
+          }
+        }
+        
+        // Sort day folders
+        dayFolders.sort();
+        
+        folderStructure[yearName][monthName] = {
+          totalFiles: monthFileCount,
+          totalDays: monthDayCount,
+          days: dayFolders
+        };
+        
+        if (monthFileCount > 0) {
+          Logger.log('  📁 ' + monthName + ': ' + monthFileCount + ' files across ' + monthDayCount + ' days');
+          Logger.log('     Days: ' + dayFolders.join(', '));
+        }
+      }
+    }
+    
+    // Summary
+    Logger.log('\n=== SUMMARY ===');
+    Logger.log('✅ Total Files: ' + totalFiles);
+    Logger.log('✅ Total Days with Data: ' + totalDays);
+    
+    // Detailed breakdown
+    Logger.log('\n=== DETAILED BREAKDOWN ===');
+    for (const year in folderStructure) {
+      for (const month in folderStructure[year]) {
+        const data = folderStructure[year][month];
+        if (data.totalFiles > 0) {
+          Logger.log(month + ': ' + data.totalFiles + ' files, ' + data.totalDays + ' days');
+          Logger.log('  Days present: ' + data.days.join(', '));
+        }
+      }
+    }
+    
+    // Recommendation
+    Logger.log('\n=== RECOMMENDATION ===');
+    if (totalFiles > 0) {
+      Logger.log('✅ You have ' + totalFiles + ' files from ' + totalDays + ' days already archived!');
+      Logger.log('📋 NEXT STEP: Run audit to identify missing dates');
+      Logger.log('⚡ Then archive ONLY the missing dates (much faster than re-doing everything)');
+    } else {
+      Logger.log('📁 Folders exist but empty - need to run full archive');
+    }
+    
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      'Found ' + totalFiles + ' files across ' + totalDays + ' days', 
+      '📊 Drive Analysis Complete', 
+      15
+    );
+    
+    return {
+      totalFiles: totalFiles,
+      totalDays: totalDays,
+      structure: folderStructure
+    };
+    
+  } catch (error) {
+    Logger.log('Error checking Drive folder: ' + error);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Error: ' + error.message, '❌ Check Failed', 10);
+  }
+}
+
+// =====================================================================================================================
 // ======================================= END RAW DATA ARCHIVE SYSTEM ================================================
 // =====================================================================================================================
 
