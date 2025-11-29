@@ -4784,7 +4784,8 @@ function archiveSingleDate_(date) {
       
       // Get folder for this date
       const monthFolder = getOrCreateRawDataMonthFolder_(year, month);
-      const dateFolder = getOrCreateRawDataDateFolder_(monthFolder, date);
+      const dateStr = formatDateForFolder_(date);
+      const dateFolder = getOrCreateDateFolder_(monthFolder, dateStr);
       
       // Process attachments
       const attachments = message.getAttachments();
