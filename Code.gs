@@ -3788,8 +3788,8 @@ function checkForNewEmails_(state) {
       return { hasNewEmails: false, newEmailCount: 0 };
     }
     
-    // Get the most recent email date we've seen
-    const archiveStartTime = new Date(state.startTime);
+    // Use last check time if available, otherwise use start time (first check only)
+    const lastCheck = state.lastCheckTime ? new Date(state.lastCheckTime) : new Date(state.startTime);
     
     let newEmailCount = 0;
     for (const thread of recentThreads) {
@@ -3797,14 +3797,14 @@ function checkForNewEmails_(state) {
       for (const message of messages) {
         const messageDate = message.getDate();
         
-        // If email is newer than when we started, it's new
-        if (messageDate > archiveStartTime) {
+        // If email is newer than last time we checked, it's new
+        if (messageDate > lastCheck) {
           newEmailCount++;
         }
       }
     }
     
-    Logger.log(`New email check: Found ${newEmailCount} emails newer than archive start time`);
+    Logger.log(`New email check: Found ${newEmailCount} emails newer than last check (${lastCheck.toISOString()})`);
     
     return {
       hasNewEmails: newEmailCount > 0,
