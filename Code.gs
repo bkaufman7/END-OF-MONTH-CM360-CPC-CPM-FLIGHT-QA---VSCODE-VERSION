@@ -3525,8 +3525,14 @@ function autoResumeRawDataArchive() {
     return;
   }
   
-  // Resume processing
-  processNextRawDataBatch_();
+  // Route to appropriate processor based on mode
+  if (state.mode === 'gap-fill') {
+    Logger.log('Auto-resuming gap-fill archive...');
+    processGapFillBatch_();
+  } else {
+    Logger.log('Auto-resuming full archive...');
+    processNextRawDataBatch_();
+  }
 }
 
 // ---------------------
