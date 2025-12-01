@@ -104,6 +104,18 @@ function clearViolations() {
 }
 
 // ---------------------
+// clearRawData
+// ---------------------
+function clearRawData() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Raw Data");
+  if (!sheet) return;
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+  }
+}
+
+// ---------------------
 // extractNetworkId
 // ---------------------
 function extractNetworkId(fileName) {
