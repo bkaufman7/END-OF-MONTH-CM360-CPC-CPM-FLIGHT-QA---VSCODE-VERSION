@@ -46,7 +46,8 @@ function onOpen() {
       .addItem("🛑 Delete Daily Progress Report", "deleteDailyProgressReportTrigger")
       .addSeparator()
       .addItem("📂 Categorize Files by Network", "categorizeRawDataByNetwork")
-      .addItem("🔍 Audit Archive Completeness", "auditRawDataArchive"))
+      .addItem("🔍 Audit Archive Completeness (Quick)", "auditRawDataArchive")
+      .addItem("🔬 Comprehensive Audit (Gmail vs Drive)", "auditRawDataArchiveComprehensive"))
     .addToUi();
 }
 
@@ -4243,6 +4244,366 @@ function renameFileWithNetworkName_(filename, networkId, networkName) {
   const newFilename = `${networkId}_${cleanNetworkName}_${nameWithoutExt}${extension}`;
   
   return newFilename;
+}
+
+/**
+ * COMPREHENSIVE AUDIT: Validates ALL attachments from Gmail are in Drive
+ * Scans Gmail for expected files and compares to actual Drive contents
+ */
+function auditRawDataArchiveComprehensive() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🔍 Comprehensive Archive Audit',
+    'This will:\n\n' +
+    '1. Scan ALL emails with subject "BKCM360 Global QA Check"\n' +
+    '2. Count attachments per date/network in Gmail\n' +
+    '3. Count actual files in Drive per date/network\n' +
+    '4. Report any missing files\n\n' +
+    'This may take 15-20 minutes for 8,880 emails.\n\n' +
+    'Proceed?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    return;
+  }
+  
+  ui.alert('Starting comprehensive audit...', 'This will run in the background. Check your email in ~20 minutes for results.', ui.ButtonSet.OK);
+  
+  try {
+    // Step 1: Scan Gmail and build expected file map
+    Logger.log('Step 1: Scanning Gmail...');
+    const expectedFiles = scanGmailForExpectedFiles_();
+    Logger.log(`Found ${expectedFiles.size} expected date|network|filename combinations in Gmail`);
+    
+    // Step 2: Scan Drive and build actual file map
+    Logger.log('Step 2: Scanning Drive...');
+    const actualFiles = scanDriveForActualFiles_();
+    Logger.log(`Found ${actualFiles.size} actual files in Drive`);
+    
+    // Step 3: Compare and identify discrepancies
+    Logger.log('Step 3: Comparing Gmail vs Drive...');
+    const missingFiles = [];
+    const extraFiles = [];
+    
+    // Check for missing files (in Gmail but not Drive)
+    expectedFiles.forEach((filename, key) => {
+      if (!actualFiles.has(key)) {
+        const parts = key.split('|');
+        missingFiles.push({
+          date: parts[0],
+          networkId: parts[1],
+          filename: filename
+        });
+      }
+    });
+    
+    // Check for extra files (in Drive but not Gmail)
+    actualFiles.forEach((filename, key) => {
+      if (!expectedFiles.has(key)) {
+        const parts = key.split('|');
+        extraFiles.push({
+          date: parts[0],
+          networkId: parts[1],
+          filename: filename
+        });
+      }
+    });
+    
+    // Step 4: Send detailed report
+    sendComprehensiveAuditReport_(expectedFiles.size, actualFiles.size, missingFiles, extraFiles);
+    
+    Logger.log('✅ Comprehensive audit complete');
+    
+  } catch (error) {
+    Logger.log('Error in comprehensive audit: ' + error);
+    MailApp.sendEmail({
+      to: Session.getActiveUser().getEmail(),
+      subject: '❌ Archive Audit Failed',
+      body: 'Error: ' + error.toString() + '\n\nCheck Apps Script logs for details.'
+    });
+  }
+}
+
+/**
+ * Scans Gmail for all "BKCM360 Global QA Check" emails and builds expected file map
+ * Returns Map: "date|networkId|filename" => filename
+ */
+function scanGmailForExpectedFiles_() {
+  const expectedFiles = new Map();
+  const query = 'subject:"BKCM360 Global QA Check"';
+  let startIndex = 0;
+  const batchSize = 100;
+  
+  while (true) {
+    const threads = GmailApp.search(query, startIndex, batchSize);
+    if (threads.length === 0) break;
+    
+    for (const thread of threads) {
+      const messages = thread.getMessages();
+      
+      for (const message of messages) {
+        const messageDate = message.getDate();
+        const dateStr = Utilities.formatDate(messageDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        const attachments = message.getAttachments();
+        
+        for (const attachment of attachments) {
+          const filename = attachment.getName();
+          const lowerFilename = filename.toLowerCase();
+          
+          // Only count CSV/XLSX files (or files inside ZIPs)
+          if (lowerFilename.endsWith('.zip')) {
+            // Extract network ID from ZIP filename
+            const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+            if (networkId) {
+              try {
+                const zipBlob = attachment.copyBlob();
+                const unzipped = Utilities.unzip(zipBlob);
+                
+                for (const file of unzipped) {
+                  const unzippedName = file.getName().toLowerCase();
+                  if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
+                    const key = `${dateStr}|${networkId}|${file.getName()}`;
+                    expectedFiles.set(key, file.getName());
+                  }
+                }
+              } catch (e) {
+                Logger.log(`Error unzipping ${filename}: ${e}`);
+              }
+            }
+          } else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
+            // Direct CSV/XLSX file
+            const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+            if (networkId) {
+              const key = `${dateStr}|${networkId}|${filename}`;
+              expectedFiles.set(key, filename);
+            }
+          }
+        }
+      }
+    }
+    
+    startIndex += batchSize;
+    
+    // Progress log every 500 emails
+    if (startIndex % 500 === 0) {
+      Logger.log(`Scanned ${startIndex} threads, found ${expectedFiles.size} expected files so far...`);
+    }
+    
+    // Safety check: avoid infinite loop
+    if (startIndex > 20000) {
+      Logger.log('Hit safety limit of 20,000 threads');
+      break;
+    }
+  }
+  
+  return expectedFiles;
+}
+
+/**
+ * Scans Drive for all actual files in date folders
+ * Returns Map: "date|networkId|filename" => filename
+ */
+function scanDriveForActualFiles_() {
+  const actualFiles = new Map();
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk'; // Raw Data folder ID
+  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  
+  // Navigate: Raw Data/2025/05-May/2025-05-15/file.csv
+  const yearFolders = rootFolder.getFolders();
+  
+  while (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    const yearName = yearFolder.getName();
+    
+    // Skip Networks folder (categorized data)
+    if (yearName === 'Networks') continue;
+    
+    // Process year folders
+    if (/^\d{4}$/.test(yearName)) {
+      const monthFolders = yearFolder.getFolders();
+      
+      while (monthFolders.hasNext()) {
+        const monthFolder = monthFolders.next();
+        const dateFolders = monthFolder.getFolders();
+        
+        while (dateFolders.hasNext()) {
+          const dateFolder = dateFolders.next();
+          const dateStr = dateFolder.getName(); // e.g., "2025-05-15"
+          
+          const files = dateFolder.getFiles();
+          while (files.hasNext()) {
+            const file = files.next();
+            const filename = file.getName();
+            
+            // Extract network ID from filename
+            const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+            if (networkId) {
+              const key = `${dateStr}|${networkId}|${filename}`;
+              actualFiles.set(key, filename);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return actualFiles;
+}
+
+/**
+ * Sends comprehensive audit report with missing and extra files
+ */
+function sendComprehensiveAuditReport_(expectedCount, actualCount, missingFiles, extraFiles) {
+  const networkMap = getNetworkMap_();
+  
+  // Group missing files by date
+  const missingByDate = {};
+  for (const item of missingFiles) {
+    if (!missingByDate[item.date]) {
+      missingByDate[item.date] = [];
+    }
+    missingByDate[item.date].push(item);
+  }
+  
+  // Group extra files by date
+  const extraByDate = {};
+  for (const item of extraFiles) {
+    if (!extraByDate[item.date]) {
+      extraByDate[item.date] = [];
+    }
+    extraByDate[item.date].push(item);
+  }
+  
+  let htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto;">
+      <h2 style="color: #1a73e8;">🔍 Comprehensive Archive Audit Report</h2>
+      
+      <h3>📊 Summary</h3>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+        <tr style="background-color: #f0f0f0;">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Expected Files (Gmail)</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${expectedCount}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Actual Files (Drive)</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${actualCount}</td>
+        </tr>
+        <tr style="background-color: ${missingFiles.length > 0 ? '#fff3cd' : '#d4edda'};">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Missing Files</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${missingFiles.length}</td>
+        </tr>
+        <tr style="background-color: ${extraFiles.length > 0 ? '#f8d7da' : '#d4edda'};">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Extra Files (not in Gmail)</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${extraFiles.length}</td>
+        </tr>
+      </table>
+  `;
+  
+  // Missing files section
+  if (missingFiles.length > 0) {
+    htmlBody += `
+      <h3>⚠️ Missing Files (In Gmail, Not in Drive)</h3>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+        <tr style="background-color: #f0f0f0;">
+          <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
+          <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Network</th>
+          <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Filename</th>
+        </tr>
+    `;
+    
+    // Show first 500 missing files (prevent email size issues)
+    const displayMissing = missingFiles.slice(0, 500);
+    for (const item of displayMissing) {
+      const networkName = networkMap[item.networkId] || 'Unknown';
+      htmlBody += `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.date}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.networkId} - ${networkName}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; font-family: monospace; font-size: 11px;">${item.filename}</td>
+        </tr>
+      `;
+    }
+    
+    if (missingFiles.length > 500) {
+      htmlBody += `
+        <tr>
+          <td colspan="3" style="padding: 8px; border: 1px solid #ddd; background-color: #fff3cd;">
+            ... and ${missingFiles.length - 500} more missing files (showing first 500)
+          </td>
+        </tr>
+      `;
+    }
+    
+    htmlBody += '</table>';
+  } else {
+    htmlBody += '<p style="color: green;">✅ No missing files! All Gmail attachments are in Drive.</p>';
+  }
+  
+  // Extra files section
+  if (extraFiles.length > 0) {
+    htmlBody += `
+      <h3>ℹ️ Extra Files (In Drive, Not in Gmail)</h3>
+      <p style="color: #856404; background-color: #fff3cd; padding: 10px; border-radius: 4px;">
+        These files exist in Drive but were not found in Gmail. This could be due to:
+        <ul>
+          <li>Emails deleted after archiving</li>
+          <li>Manual file uploads</li>
+          <li>Files from other sources</li>
+        </ul>
+      </p>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+        <tr style="background-color: #f0f0f0;">
+          <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
+          <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Network</th>
+          <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Filename</th>
+        </tr>
+    `;
+    
+    // Show first 100 extra files
+    const displayExtra = extraFiles.slice(0, 100);
+    for (const item of displayExtra) {
+      const networkName = networkMap[item.networkId] || 'Unknown';
+      htmlBody += `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.date}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.networkId} - ${networkName}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; font-family: monospace; font-size: 11px;">${item.filename}</td>
+        </tr>
+      `;
+    }
+    
+    if (extraFiles.length > 100) {
+      htmlBody += `
+        <tr>
+          <td colspan="3" style="padding: 8px; border: 1px solid #ddd; background-color: #fff3cd;">
+            ... and ${extraFiles.length - 100} more extra files (showing first 100)
+          </td>
+        </tr>
+      `;
+    }
+    
+    htmlBody += '</table>';
+  }
+  
+  htmlBody += `
+      <h3>📋 Next Steps</h3>
+      <ul>
+        <li>Review missing files and run gap-fill archive to retrieve them</li>
+        <li>Extra files can generally be ignored unless you suspect data corruption</li>
+      </ul>
+      
+      <hr style="border: 1px solid #ddd; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">Report generated: ${new Date().toLocaleString()}</p>
+    </div>
+  `;
+  
+  MailApp.sendEmail({
+    to: Session.getActiveUser().getEmail(),
+    subject: `[CM360 Archive] Comprehensive Audit Report - ${missingFiles.length} Missing, ${extraFiles.length} Extra`,
+    htmlBody: htmlBody
+  });
 }
 
 /**
