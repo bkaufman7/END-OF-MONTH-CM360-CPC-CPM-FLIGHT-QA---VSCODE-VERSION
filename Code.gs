@@ -6013,8 +6013,8 @@ function checkDriveRawDataFolder() {
 // =====================================================================================================================
 
 /**
- * Regenerate violations report for a specific date by pulling from Gmail
- * Useful when daily QA times out and doesn't save the report
+ * Regenerate violations report for a specific date by re-processing raw data
+ * Useful when daily QA times out and doesn't complete the analysis
  */
 function regenerateViolationsReportForDate() {
   const ui = SpreadsheetApp.getUi();
@@ -6022,7 +6022,12 @@ function regenerateViolationsReportForDate() {
   // Ask for date
   const dateResponse = ui.prompt(
     '📅 Regenerate Violations Report',
-    'Enter the date to regenerate (YYYY-MM-DD):\n\nExample: 2025-11-28',
+    'Enter the date to regenerate (YYYY-MM-DD):\n\nExample: 2025-11-28\n\n' +
+    'This will:\n' +
+    '1. Download raw CSV files from Gmail for that date\n' +
+    '2. Process them through QA analysis\n' +
+    '3. Generate violations report\n' +
+    '4. Save to Drive',
     ui.ButtonSet.OK_CANCEL
   );
   
@@ -6040,11 +6045,14 @@ function regenerateViolationsReportForDate() {
   
   // Confirm
   const confirm = ui.alert(
-    '📥 Regenerate Report',
-    `This will:\n\n` +
-    `1. Search Gmail for email: "CM360 Daily QA Summary" on ${dateStr}\n` +
-    `2. Extract the violations report HTML\n` +
-    `3. Save as XLSX to Drive folder: Violations Reports/${dateStr.substring(0, 7)}/\n\n` +
+    '🔄 Regenerate Report',
+    `This will fully re-process ${dateStr}:\n\n` +
+    `1. Clear current Violations sheet\n` +
+    `2. Download raw CSV files from Gmail emails on ${dateStr}\n` +
+    `3. Process through full QA analysis\n` +
+    `4. Generate new violations report\n` +
+    `5. Save XLSX to Drive\n\n` +
+    `This may take several minutes.\n\n` +
     `Proceed?`,
     ui.ButtonSet.YES_NO
   );
@@ -6055,16 +6063,20 @@ function regenerateViolationsReportForDate() {
   
   // Process
   try {
+    ui.alert('⏳ Processing', `Starting full QA for ${dateStr}...\n\nThis will take a few minutes.`, ui.ButtonSet.OK);
+    
     const result = regenerateViolationsReportForDate_(dateStr);
     
     if (result.success) {
       ui.alert(
         '✅ Report Regenerated',
-        `Successfully saved violations report for ${dateStr}\n\n` +
+        `Successfully regenerated violations report for ${dateStr}\n\n` +
+        `Raw files processed: ${result.filesProcessed}\n` +
+        `Total placements checked: ${result.placementsChecked}\n` +
+        `Violations found: ${result.violationCount}\n\n` +
         `File: ${result.filename}\n` +
         `Folder: ${result.folderPath}\n` +
-        `URL: ${result.fileUrl}\n\n` +
-        `Total violations: ${result.violationCount}`,
+        `URL: ${result.fileUrl}`,
         ui.ButtonSet.OK
       );
     } else {
@@ -6167,9 +6179,175 @@ function batchRegenerateViolationsReports() {
 
 /**
  * Internal function to regenerate violations report for a specific date
- * Returns: { success: boolean, filename: string, fileUrl: string, error: string }
+ * Downloads raw CSVs from Gmail, processes through QA, generates and saves report
+ * Returns: { success: boolean, filename: string, fileUrl: string, error: string, ... }
  */
 function regenerateViolationsReportForDate_(dateStr) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rawSheet = ss.getSheetByName("Raw Data");
+  const violationsSheet = ss.getSheetByName("Violations");
+  const networksSheet = ss.getSheetByName("Networks");
+  
+  if (!rawSheet || !violationsSheet || !networksSheet) {
+    return { success: false, error: "Required sheets not found (Raw Data, Violations, Networks)" };
+  }
+  
+  // Step 1: Clear existing data
+  Logger.log(`Clearing Raw Data and Violations sheets...`);
+  clearRawData();
+  clearViolations();
+  
+  // Step 2: Download raw CSVs from Gmail for this specific date
+  Logger.log(`Downloading raw CSV files from Gmail for ${dateStr}...`);
+  const downloadResult = downloadRawDataForDate_(dateStr);
+  
+  if (!downloadResult.success) {
+    return { success: false, error: downloadResult.error };
+  }
+  
+  Logger.log(`Downloaded ${downloadResult.filesProcessed} files`);
+  
+  // Step 3: Process the data (run QA analysis)
+  Logger.log(`Running QA analysis...`);
+  try {
+    processCSVData(); // This populates the Violations sheet
+  } catch (error) {
+    return { success: false, error: `QA processing failed: ${error.toString()}` };
+  }
+  
+  // Step 4: Check if violations were generated
+  const violationCount = violationsSheet.getLastRow() - 1; // Exclude header
+  Logger.log(`QA complete: ${violationCount} violations found`);
+  
+  // Step 5: Save violations report to Drive
+  Logger.log(`Saving violations report to Drive...`);
+  const saveResult = saveViolationsReportToDrive_(dateStr, violationCount);
+  
+  if (!saveResult.success) {
+    return { success: false, error: saveResult.error };
+  }
+  
+  return {
+    success: true,
+    filename: saveResult.filename,
+    folderPath: saveResult.folderPath,
+    fileUrl: saveResult.fileUrl,
+    filesProcessed: downloadResult.filesProcessed,
+    placementsChecked: rawSheet.getLastRow() - 1,
+    violationCount: violationCount
+  };
+}
+
+/**
+ * Download raw CSV files from Gmail for a specific date
+ * Returns: { success: boolean, filesProcessed: number, error: string }
+ */
+function downloadRawDataForDate_(dateStr) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rawSheet = ss.getSheetByName("Raw Data");
+  
+  // Search for emails on this specific date
+  const nextDate = getNextDate_(dateStr);
+  const searchQuery = `subject:"BKCM360 Global QA Check" after:${dateStr} before:${nextDate} has:attachment`;
+  
+  Logger.log(`Searching Gmail: ${searchQuery}`);
+  const threads = GmailApp.search(searchQuery);
+  
+  if (threads.length === 0) {
+    return {
+      success: false,
+      error: `No emails found for ${dateStr}. Check if emails exist with subject "BKCM360 Global QA Check".`
+    };
+  }
+  
+  Logger.log(`Found ${threads.length} email thread(s)`);
+  
+  let filesProcessed = 0;
+  let currentRow = 2; // Start after header
+  
+  // Process each thread
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    
+    for (const message of messages) {
+      const attachments = message.getAttachments();
+      
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        const lowerFilename = filename.toLowerCase();
+        
+        // Only process CSV/XLSX files
+        if (lowerFilename.endsWith('.csv')) {
+          try {
+            const content = attachment.getDataAsString();
+            const networkId = extractNetworkId(filename);
+            const rows = processCSV(content, networkId);
+            
+            if (rows.length > 0) {
+              rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
+              currentRow += rows.length;
+              filesProcessed++;
+              Logger.log(`Processed: ${filename} (${rows.length} rows)`);
+            }
+          } catch (error) {
+            Logger.log(`Error processing ${filename}: ${error}`);
+          }
+        } else if (lowerFilename.endsWith('.zip')) {
+          try {
+            const zipBlob = attachment.copyBlob();
+            const unzipped = Utilities.unzip(zipBlob);
+            
+            for (const file of unzipped) {
+              const unzippedName = file.getName().toLowerCase();
+              if (unzippedName.endsWith('.csv')) {
+                const content = file.getDataAsString();
+                const networkId = extractNetworkId(file.getName());
+                const rows = processCSV(content, networkId);
+                
+                if (rows.length > 0) {
+                  rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
+                  currentRow += rows.length;
+                  filesProcessed++;
+                  Logger.log(`Processed from ZIP: ${file.getName()} (${rows.length} rows)`);
+                }
+              }
+            }
+          } catch (error) {
+            Logger.log(`Error processing ZIP ${filename}: ${error}`);
+          }
+        }
+      }
+    }
+  }
+  
+  if (filesProcessed === 0) {
+    return {
+      success: false,
+      error: `Found ${threads.length} email(s) but no CSV/ZIP attachments could be processed.`
+    };
+  }
+  
+  return {
+    success: true,
+    filesProcessed: filesProcessed
+  };
+}
+
+/**
+ * Save violations report to Drive as XLSX
+ * Returns: { success: boolean, filename: string, folderPath: string, fileUrl: string, error: string }
+ */
+function saveViolationsReportToDrive_(dateStr, violationCount) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const violationsSheet = ss.getSheetByName("Violations");
+  
+  if (!violationsSheet || violationsSheet.getLastRow() < 2) {
+    return {
+      success: false,
+      error: "No violations data to save (sheet is empty or has only headers)"
+    };
+  }
+  
   const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk'; // Raw Data folder
   const rootFolder = DriveApp.getFolderById(rootFolderId);
   
@@ -6192,43 +6370,9 @@ function regenerateViolationsReportForDate_(dateStr) {
     monthFolder = violationsReportsFolder.createFolder(yearMonth);
   }
   
-  // Search Gmail for the daily summary email
-  const searchQuery = `subject:"CM360 Daily QA Summary" after:${dateStr} before:${getNextDate_(dateStr)}`;
-  const threads = GmailApp.search(searchQuery);
-  
-  if (threads.length === 0) {
-    return {
-      success: false,
-      error: `No email found for ${dateStr}. Email may not exist or was sent with a different subject.`
-    };
-  }
-  
-  // Get the first thread (should be the only one for that date)
-  const messages = threads[0].getMessages();
-  if (messages.length === 0) {
-    return {
-      success: false,
-      error: `Thread found but no messages for ${dateStr}`
-    };
-  }
-  
-  // Get the latest message in the thread
-  const message = messages[messages.length - 1];
-  const htmlBody = message.getBody();
-  
-  // Extract violations table from HTML
-  const violationsData = extractViolationsFromHTML_(htmlBody);
-  
-  if (violationsData.length === 0) {
-    return {
-      success: false,
-      error: `No violations table found in email for ${dateStr}`
-    };
-  }
-  
-  // Create XLSX from violations data
+  // Create XLSX from Violations sheet
   const filename = `Violations_${dateStr}.xlsx`;
-  const xlsxBlob = createXLSXFromData_(violationsData, `Violations ${dateStr}`);
+  const xlsxBlob = createXLSXFromSheet(violationsSheet);
   xlsxBlob.setName(filename);
   
   // Delete old file if exists
@@ -6241,73 +6385,14 @@ function regenerateViolationsReportForDate_(dateStr) {
   const file = monthFolder.createFile(xlsxBlob);
   const fileUrl = file.getUrl();
   
-  Logger.log(`✅ Saved violations report: ${filename} (${violationsData.length - 1} violations)`);
+  Logger.log(`✅ Saved violations report: ${filename} (${violationCount} violations)`);
   
   return {
     success: true,
     filename: filename,
     folderPath: `Violations Reports/${yearMonth}`,
-    fileUrl: fileUrl,
-    violationCount: violationsData.length - 1
+    fileUrl: fileUrl
   };
-}
-
-/**
- * Extract violations table data from HTML email body
- * Returns: [[headers], [row1], [row2], ...]
- */
-function extractViolationsFromHTML_(htmlBody) {
-  const violations = [];
-  
-  // Look for the violations table (has specific headers)
-  const tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/gi;
-  let tableMatch;
-  
-  while ((tableMatch = tableRegex.exec(htmlBody)) !== null) {
-    const tableHTML = tableMatch[1];
-    
-    // Check if this is the violations table (look for "Advertiser" header)
-    if (!tableHTML.includes('Advertiser') || !tableHTML.includes('Placement')) {
-      continue;
-    }
-    
-    // Extract rows
-    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    let rowMatch;
-    let isHeaderRow = true;
-    
-    while ((rowMatch = rowRegex.exec(tableHTML)) !== null) {
-      const rowHTML = rowMatch[1];
-      const cells = [];
-      
-      // Extract cells (th or td)
-      const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
-      let cellMatch;
-      
-      while ((cellMatch = cellRegex.exec(rowHTML)) !== null) {
-        let cellText = cellMatch[1];
-        // Strip HTML tags and decode entities
-        cellText = cellText.replace(/<[^>]+>/g, '').trim();
-        cellText = cellText.replace(/&nbsp;/g, ' ');
-        cellText = cellText.replace(/&amp;/g, '&');
-        cellText = cellText.replace(/&lt;/g, '<');
-        cellText = cellText.replace(/&gt;/g, '>');
-        cellText = cellText.replace(/&quot;/g, '"');
-        cells.push(cellText);
-      }
-      
-      if (cells.length > 0) {
-        violations.push(cells);
-      }
-    }
-    
-    // If we found a violations table, stop looking
-    if (violations.length > 0) {
-      break;
-    }
-  }
-  
-  return violations;
 }
 
 /**
@@ -6334,34 +6419,6 @@ function generateDateRange_(startDateStr, endDateStr) {
   }
   
   return dates;
-}
-
-/**
- * Helper: Create XLSX from 2D array data
- */
-function createXLSXFromData_(data, sheetName) {
-  // Create temporary spreadsheet
-  const tempSS = SpreadsheetApp.create('temp_violations_' + new Date().getTime());
-  const sheet = tempSS.getSheets()[0];
-  sheet.setName(sheetName);
-  
-  // Write data
-  if (data.length > 0) {
-    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
-    
-    // Format header row
-    const headerRange = sheet.getRange(1, 1, 1, data[0].length);
-    headerRange.setFontWeight('bold');
-    headerRange.setBackground('#f0f0f0');
-  }
-  
-  // Convert to XLSX
-  const blob = DriveApp.getFileById(tempSS.getId()).getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  
-  // Delete temporary spreadsheet
-  DriveApp.getFileById(tempSS.getId()).setTrashed(true);
-  
-  return blob;
 }
 
 // =====================================================================================================================
