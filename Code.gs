@@ -4311,8 +4311,8 @@ function auditRawDataArchiveComprehensive() {
   const state = {
     phase: 'gmail_scan',
     gmailStartIndex: 0,
-    expectedFilesJson: '{}',
-    actualFilesJson: '{}',
+    expectedCountsJson: '{}',
+    actualCountsJson: '{}',
     startTime: new Date().toISOString()
   };
   
@@ -4352,16 +4352,16 @@ function processComprehensiveAuditBatch_() {
       Logger.log(`Gmail scan: Starting at index ${state.gmailStartIndex}`);
       
       // Continue Gmail scan
-      const expectedFiles = new Map(Object.entries(JSON.parse(state.expectedFilesJson)));
-      const result = scanGmailBatch_(state.gmailStartIndex, expectedFiles, startTime, MAX_EXECUTION_MS);
+      const expectedCounts = new Map(Object.entries(JSON.parse(state.expectedCountsJson)).map(([k, v]) => [k, Number(v)]));
+      const result = scanGmailBatch_(state.gmailStartIndex, expectedCounts, startTime, MAX_EXECUTION_MS);
       
-      state.expectedFilesJson = JSON.stringify(Object.fromEntries(result.expectedFiles));
+      state.expectedCountsJson = JSON.stringify(Object.fromEntries(result.expectedCounts));
       state.gmailStartIndex = result.nextIndex;
       
       if (result.complete) {
-        Logger.log(`Gmail scan complete: ${result.expectedFiles.size} files found`);
+        const totalFiles = Array.from(result.expectedCounts.values()).reduce((sum, count) => sum + count, 0);
+        Logger.log(`Gmail scan complete: ${totalFiles} files found`);
         state.phase = 'drive_scan';
-        state.driveYearIndex = 0;
       }
       
       props.setProperty(stateKey, JSON.stringify(state));
@@ -4371,12 +4371,13 @@ function processComprehensiveAuditBatch_() {
       Logger.log('Drive scan: Scanning folders...');
       
       // Scan Drive (usually completes in one run)
-      const actualFiles = scanDriveForActualFiles_();
-      state.actualFilesJson = JSON.stringify(Object.fromEntries(actualFiles));
+      const actualCounts = scanDriveForActualCounts_();
+      state.actualCountsJson = JSON.stringify(Object.fromEntries(actualCounts));
       state.phase = 'compare';
       
       props.setProperty(stateKey, JSON.stringify(state));
-      Logger.log(`Drive scan complete: ${actualFiles.size} files found`);
+      const totalFiles = Array.from(actualCounts.values()).reduce((sum, count) => sum + count, 0);
+      Logger.log(`Drive scan complete: ${totalFiles} files found`);
       
       // Continue to comparison immediately if time allows
       if (new Date() - startTime < MAX_EXECUTION_MS) {
@@ -4386,38 +4387,52 @@ function processComprehensiveAuditBatch_() {
     } else if (state.phase === 'compare') {
       Logger.log('Comparison phase: Analyzing differences...');
       
-      const expectedFiles = new Map(Object.entries(JSON.parse(state.expectedFilesJson)));
-      const actualFiles = new Map(Object.entries(JSON.parse(state.actualFilesJson)));
+      const expectedCounts = new Map(Object.entries(JSON.parse(state.expectedCountsJson)).map(([k, v]) => [k, Number(v)]));
+      const actualCounts = new Map(Object.entries(JSON.parse(state.actualCountsJson)).map(([k, v]) => [k, Number(v)]));
       
-      const missingFiles = [];
-      const extraFiles = [];
+      const missingDateNetworks = [];
+      const extraDateNetworks = [];
+      const countMismatches = [];
       
-      // Check for missing files (in Gmail but not Drive)
-      expectedFiles.forEach((filename, key) => {
-        if (!actualFiles.has(key)) {
-          const parts = key.split('|');
-          missingFiles.push({
+      // Check for missing date/networks (in Gmail but not Drive)
+      expectedCounts.forEach((expectedCount, key) => {
+        const actualCount = actualCounts.get(key) || 0;
+        const parts = key.split('|');
+        
+        if (actualCount === 0) {
+          missingDateNetworks.push({
             date: parts[0],
             networkId: parts[1],
-            filename: filename
+            expectedCount: expectedCount
+          });
+        } else if (actualCount !== expectedCount) {
+          countMismatches.push({
+            date: parts[0],
+            networkId: parts[1],
+            expectedCount: expectedCount,
+            actualCount: actualCount,
+            difference: actualCount - expectedCount
           });
         }
       });
       
-      // Check for extra files (in Drive but not Gmail)
-      actualFiles.forEach((filename, key) => {
-        if (!expectedFiles.has(key)) {
+      // Check for extra date/networks (in Drive but not Gmail)
+      actualCounts.forEach((actualCount, key) => {
+        if (!expectedCounts.has(key)) {
           const parts = key.split('|');
-          extraFiles.push({
+          extraDateNetworks.push({
             date: parts[0],
             networkId: parts[1],
-            filename: filename
+            actualCount: actualCount
           });
         }
       });
+      
+      const totalExpected = Array.from(expectedCounts.values()).reduce((sum, count) => sum + count, 0);
+      const totalActual = Array.from(actualCounts.values()).reduce((sum, count) => sum + count, 0);
       
       // Send report
-      sendComprehensiveAuditReport_(expectedFiles.size, actualFiles.size, missingFiles, extraFiles);
+      sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missingDateNetworks, extraDateNetworks, countMismatches);
       
       // Clean up state
       props.deleteProperty(stateKey);
@@ -4439,9 +4454,10 @@ function processComprehensiveAuditBatch_() {
 
 /**
  * Scan Gmail in batches with time limit
- * Returns: { expectedFiles: Map, nextIndex: number, complete: boolean }
+ * Returns: { expectedCounts: Map, nextIndex: number, complete: boolean }
+ * expectedCounts format: "date|networkId" => count
  */
-function scanGmailBatch_(startIndex, expectedFiles, startTime, maxExecutionMs) {
+function scanGmailBatch_(startIndex, expectedCounts, startTime, maxExecutionMs) {
   const query = 'subject:"BKCM360 Global QA Check"';
   const batchSize = 100;
   let currentIndex = startIndex;
@@ -4451,13 +4467,13 @@ function scanGmailBatch_(startIndex, expectedFiles, startTime, maxExecutionMs) {
     const elapsed = new Date() - startTime;
     if (elapsed > maxExecutionMs) {
       Logger.log(`Time limit reached at index ${currentIndex}`);
-      return { expectedFiles, nextIndex: currentIndex, complete: false };
+      return { expectedCounts, nextIndex: currentIndex, complete: false };
     }
     
     const threads = GmailApp.search(query, currentIndex, batchSize);
     if (threads.length === 0) {
       Logger.log(`Gmail scan complete at index ${currentIndex}`);
-      return { expectedFiles, nextIndex: currentIndex, complete: true };
+      return { expectedCounts, nextIndex: currentIndex, complete: true };
     }
     
     for (const thread of threads) {
@@ -4483,8 +4499,8 @@ function scanGmailBatch_(startIndex, expectedFiles, startTime, maxExecutionMs) {
                 for (const file of unzipped) {
                   const unzippedName = file.getName().toLowerCase();
                   if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
-                    const key = `${dateStr}|${networkId}|${file.getName()}`;
-                    expectedFiles.set(key, file.getName());
+                    const key = `${dateStr}|${networkId}`;
+                    expectedCounts.set(key, (expectedCounts.get(key) || 0) + 1);
                   }
                 }
               } catch (e) {
@@ -4494,8 +4510,8 @@ function scanGmailBatch_(startIndex, expectedFiles, startTime, maxExecutionMs) {
           } else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
             const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
             if (networkId) {
-              const key = `${dateStr}|${networkId}|${filename}`;
-              expectedFiles.set(key, filename);
+              const key = `${dateStr}|${networkId}`;
+              expectedCounts.set(key, (expectedCounts.get(key) || 0) + 1);
             }
           }
         }
@@ -4506,13 +4522,14 @@ function scanGmailBatch_(startIndex, expectedFiles, startTime, maxExecutionMs) {
     
     // Progress log every 500 emails
     if (currentIndex % 500 === 0) {
-      Logger.log(`Scanned ${currentIndex} threads, found ${expectedFiles.size} expected files so far...`);
+      const totalFiles = Array.from(expectedCounts.values()).reduce((sum, count) => sum + count, 0);
+      Logger.log(`Scanned ${currentIndex} threads, found ${totalFiles} expected files so far...`);
     }
     
     // Safety limit
     if (currentIndex > 20000) {
       Logger.log('Hit safety limit of 20,000 threads');
-      return { expectedFiles, nextIndex: currentIndex, complete: true };
+      return { expectedCounts, nextIndex: currentIndex, complete: true };
     }
   }
 }
@@ -4550,22 +4567,22 @@ function viewComprehensiveAuditProgress() {
   }
   
   const state = JSON.parse(stateJson);
-  const expectedCount = Object.keys(JSON.parse(state.expectedFilesJson)).length;
-  const actualCount = Object.keys(JSON.parse(state.actualFilesJson || '{}')).length;
+  const expectedCount = Object.keys(JSON.parse(state.expectedCountsJson || '{}')).length;
+  const actualCount = Object.keys(JSON.parse(state.actualCountsJson || '{}')).length;
   
   let message = `Phase: ${state.phase.toUpperCase()}\n\n`;
   
   if (state.phase === 'gmail_scan') {
     message += `Gmail threads scanned: ${state.gmailStartIndex}\n`;
-    message += `Expected files found: ${expectedCount}\n\n`;
+    message += `Date/Network combinations found: ${expectedCount}\n\n`;
     message += 'Status: Scanning emails for attachments...';
   } else if (state.phase === 'drive_scan') {
-    message += `Expected files (from Gmail): ${expectedCount}\n`;
-    message += `Actual files (from Drive): ${actualCount}\n\n`;
+    message += `Expected date/networks (from Gmail): ${expectedCount}\n`;
+    message += `Actual date/networks (from Drive): ${actualCount}\n\n`;
     message += 'Status: Scanning Drive folders...';
   } else if (state.phase === 'compare') {
-    message += `Expected files: ${expectedCount}\n`;
-    message += `Actual files: ${actualCount}\n\n`;
+    message += `Expected date/networks: ${expectedCount}\n`;
+    message += `Actual date/networks: ${actualCount}\n\n`;
     message += 'Status: Comparing and generating report...';
   }
   
@@ -4658,6 +4675,61 @@ function scanGmailForExpectedFiles_() {
  * Scans Drive for all actual files in date folders
  * Returns Map: "date|networkId|filename" => filename
  */
+/**
+ * Scans Drive folders and builds actual file count map
+ * Returns Map: "date|networkId" => count
+ */
+function scanDriveForActualCounts_() {
+  const actualCounts = new Map();
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk'; // Raw Data folder ID
+  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  
+  // Navigate: Raw Data/2025/05-May/2025-05-15/file.csv
+  const yearFolders = rootFolder.getFolders();
+  
+  while (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    const yearName = yearFolder.getName();
+    
+    // Skip Networks folder (categorized data)
+    if (yearName === 'Networks') continue;
+    
+    // Process year folders
+    if (/^\d{4}$/.test(yearName)) {
+      const monthFolders = yearFolder.getFolders();
+      
+      while (monthFolders.hasNext()) {
+        const monthFolder = monthFolders.next();
+        const dateFolders = monthFolder.getFolders();
+        
+        while (dateFolders.hasNext()) {
+          const dateFolder = dateFolders.next();
+          const dateStr = dateFolder.getName(); // e.g., "2025-05-15"
+          
+          const files = dateFolder.getFiles();
+          while (files.hasNext()) {
+            const file = files.next();
+            const filename = file.getName();
+            
+            // Extract network ID from filename
+            const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+            if (networkId) {
+              const key = `${dateStr}|${networkId}`;
+              actualCounts.set(key, (actualCounts.get(key) || 0) + 1);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return actualCounts;
+}
+
+/**
+ * LEGACY: Scans Drive for actual files (kept for reference)
+ * Returns Map: "date|networkId|filename" => filename
+ */
 function scanDriveForActualFiles_() {
   const actualFiles = new Map();
   const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk'; // Raw Data folder ID
@@ -4706,7 +4778,199 @@ function scanDriveForActualFiles_() {
 }
 
 /**
- * Sends comprehensive audit report with missing and extra files
+ * Sends comprehensive audit report with count-based comparison
+ */
+function sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missingDateNetworks, extraDateNetworks, countMismatches) {
+  const networkMap = getNetworkMap_();
+  
+  const hasIssues = missingDateNetworks.length > 0 || extraDateNetworks.length > 0 || countMismatches.length > 0;
+  
+  let htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto;">
+      <h2 style="color: ${hasIssues ? '#d93025' : '#1e8e3e'};">🔍 Comprehensive Archive Audit Report</h2>
+      
+      <h3>📊 Summary</h3>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+        <tr style="background-color: #f0f0f0;">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Expected Files (Gmail)</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${totalExpected.toLocaleString()}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Actual Files (Drive)</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${totalActual.toLocaleString()}</td>
+        </tr>
+        <tr style="background-color: ${totalExpected === totalActual ? '#d4edda' : '#fff3cd'};">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Difference</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${totalActual - totalExpected}</td>
+        </tr>
+      </table>
+      
+      <h3>🔍 Issues Found</h3>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+        <tr style="background-color: ${missingDateNetworks.length > 0 ? '#fff3cd' : '#d4edda'};">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Missing Date/Networks</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${missingDateNetworks.length}</td>
+        </tr>
+        <tr style="background-color: ${extraDateNetworks.length > 0 ? '#f8d7da' : '#d4edda'};">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Extra Date/Networks</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${extraDateNetworks.length}</td>
+        </tr>
+        <tr style="background-color: ${countMismatches.length > 0 ? '#fff3cd' : '#d4edda'};">
+          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Count Mismatches</strong></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${countMismatches.length}</td>
+        </tr>
+      </table>
+  `;
+  
+  // Missing date/networks section
+  if (missingDateNetworks.length > 0) {
+    htmlBody += `
+      <h3>❌ Missing Date/Networks (In Gmail, Not in Drive)</h3>
+      <p>These dates have emails but no files saved in Drive:</p>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 12px;">
+        <thead>
+          <tr style="background-color: #f0f0f0;">
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Date</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network ID</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network Name</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Expected Files</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    
+    missingDateNetworks.sort((a, b) => a.date.localeCompare(b.date));
+    for (const item of missingDateNetworks) {
+      const networkName = networkMap.get(item.networkId) || 'Unknown';
+      htmlBody += `
+        <tr>
+          <td style="padding: 6px; border: 1px solid #ddd;">${item.date}</td>
+          <td style="padding: 6px; border: 1px solid #ddd;">${item.networkId}</td>
+          <td style="padding: 6px; border: 1px solid #ddd;">${networkName}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">${item.expectedCount}</td>
+        </tr>
+      `;
+    }
+    
+    htmlBody += `
+        </tbody>
+      </table>
+    `;
+  }
+  
+  // Extra date/networks section
+  if (extraDateNetworks.length > 0) {
+    htmlBody += `
+      <h3>➕ Extra Date/Networks (In Drive, Not in Gmail)</h3>
+      <p>These dates have files in Drive but no corresponding emails:</p>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 12px;">
+        <thead>
+          <tr style="background-color: #f0f0f0;">
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Date</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network ID</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network Name</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Actual Files</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    
+    extraDateNetworks.sort((a, b) => a.date.localeCompare(b.date));
+    for (const item of extraDateNetworks) {
+      const networkName = networkMap.get(item.networkId) || 'Unknown';
+      htmlBody += `
+        <tr>
+          <td style="padding: 6px; border: 1px solid #ddd;">${item.date}</td>
+          <td style="padding: 6px; border: 1px solid #ddd;">${item.networkId}</td>
+          <td style="padding: 6px; border: 1px solid #ddd;">${networkName}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">${item.actualCount}</td>
+        </tr>
+      `;
+    }
+    
+    htmlBody += `
+        </tbody>
+      </table>
+    `;
+  }
+  
+  // Count mismatches section
+  if (countMismatches.length > 0) {
+    htmlBody += `
+      <h3>⚠️ File Count Mismatches</h3>
+      <p>These date/networks exist in both Gmail and Drive but have different file counts:</p>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 12px;">
+        <thead>
+          <tr style="background-color: #f0f0f0;">
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Date</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network ID</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: left;">Network Name</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Expected</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Actual</th>
+            <th style="padding: 6px; border: 1px solid #ddd; text-align: right;">Difference</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    
+    countMismatches.sort((a, b) => a.date.localeCompare(b.date) || a.networkId.localeCompare(b.networkId));
+    for (const item of countMismatches) {
+      const networkName = networkMap.get(item.networkId) || 'Unknown';
+      const diffColor = item.difference > 0 ? '#d4edda' : '#f8d7da';
+      htmlBody += `
+        <tr>
+          <td style="padding: 6px; border: 1px solid #ddd;">${item.date}</td>
+          <td style="padding: 6px; border: 1px solid #ddd;">${item.networkId}</td>
+          <td style="padding: 6px; border: 1px solid #ddd;">${networkName}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">${item.expectedCount}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">${item.actualCount}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: right; background-color: ${diffColor};">${item.difference > 0 ? '+' : ''}${item.difference}</td>
+        </tr>
+      `;
+    }
+    
+    htmlBody += `
+        </tbody>
+      </table>
+    `;
+  }
+  
+  // Final status
+  if (!hasIssues) {
+    htmlBody += `
+      <div style="background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; padding: 15px; margin-top: 20px;">
+        <h3 style="color: #155724; margin: 0;">✅ Archive is Complete!</h3>
+        <p style="margin: 10px 0 0 0;">All Gmail attachments are properly saved in Drive with matching counts.</p>
+      </div>
+    `;
+  } else {
+    htmlBody += `
+      <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px; margin-top: 20px;">
+        <h3 style="color: #856404; margin: 0;">⚠️ Action Required</h3>
+        <p style="margin: 10px 0 0 0;">Please review the issues above and use the gap-fill archive tool to correct missing data.</p>
+      </div>
+    `;
+  }
+  
+  htmlBody += `
+    </div>
+  `;
+  
+  const subject = hasIssues 
+    ? '⚠️ Comprehensive Archive Audit Complete (Issues Found)'
+    : '✅ Comprehensive Archive Audit Complete';
+  
+  MailApp.sendEmail({
+    to: Session.getActiveUser().getEmail(),
+    subject: subject,
+    htmlBody: htmlBody
+  });
+  
+  Logger.log('Comprehensive audit report sent');
+}
+
+/**
+ * LEGACY: Sends comprehensive audit report with file-level details
  */
 function sendComprehensiveAuditReport_(expectedCount, actualCount, missingFiles, extraFiles) {
   const networkMap = getNetworkMap_();
