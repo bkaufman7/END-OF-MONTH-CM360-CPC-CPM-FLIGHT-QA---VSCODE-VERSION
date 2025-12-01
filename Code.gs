@@ -52,6 +52,10 @@ function onOpen() {
       .addItem("🔄 Resume Comprehensive Audit", "processComprehensiveAuditBatch_")
       .addItem("📊 View Audit Progress", "viewComprehensiveAuditProgress")
       .addItem("🔄 Reset Comprehensive Audit", "resetComprehensiveAudit"))
+    .addSeparator()
+    .addSubMenu(ui.createMenu("📋 Violations Reports")
+      .addItem("📥 Regenerate Report for Specific Date", "regenerateViolationsReportForDate")
+      .addItem("📥 Batch Regenerate (Multiple Dates)", "batchRegenerateViolationsReports"))
     .addToUi();
 }
 
@@ -6002,6 +6006,366 @@ function checkDriveRawDataFolder() {
 
 // =====================================================================================================================
 // ======================================= END RAW DATA ARCHIVE SYSTEM ================================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ================================= VIOLATIONS REPORT GAP-FILL SYSTEM =================================================
+// =====================================================================================================================
+
+/**
+ * Regenerate violations report for a specific date by pulling from Gmail
+ * Useful when daily QA times out and doesn't save the report
+ */
+function regenerateViolationsReportForDate() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Ask for date
+  const dateResponse = ui.prompt(
+    '📅 Regenerate Violations Report',
+    'Enter the date to regenerate (YYYY-MM-DD):\n\nExample: 2025-11-28',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (dateResponse.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const dateStr = dateResponse.getResponseText().trim();
+  
+  // Validate date format
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    ui.alert('❌ Invalid Format', 'Please use YYYY-MM-DD format (e.g., 2025-11-28)', ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Confirm
+  const confirm = ui.alert(
+    '📥 Regenerate Report',
+    `This will:\n\n` +
+    `1. Search Gmail for email: "CM360 Daily QA Summary" on ${dateStr}\n` +
+    `2. Extract the violations report HTML\n` +
+    `3. Save as XLSX to Drive folder: Violations Reports/${dateStr.substring(0, 7)}/\n\n` +
+    `Proceed?`,
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirm !== ui.Button.YES) {
+    return;
+  }
+  
+  // Process
+  try {
+    const result = regenerateViolationsReportForDate_(dateStr);
+    
+    if (result.success) {
+      ui.alert(
+        '✅ Report Regenerated',
+        `Successfully saved violations report for ${dateStr}\n\n` +
+        `File: ${result.filename}\n` +
+        `Folder: ${result.folderPath}\n` +
+        `URL: ${result.fileUrl}\n\n` +
+        `Total violations: ${result.violationCount}`,
+        ui.ButtonSet.OK
+      );
+    } else {
+      ui.alert('❌ Failed', result.error, ui.ButtonSet.OK);
+    }
+    
+  } catch (error) {
+    ui.alert('❌ Error', error.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Batch regenerate violations reports for multiple dates
+ */
+function batchRegenerateViolationsReports() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Ask for date range or list
+  const dateResponse = ui.prompt(
+    '📅 Batch Regenerate Reports',
+    'Enter dates (comma-separated):\n\n' +
+    'Example: 2025-11-28, 2025-11-29, 2025-11-30\n\n' +
+    'Or enter a range:\n' +
+    'Example: 2025-11-28 to 2025-11-30',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (dateResponse.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const input = dateResponse.getResponseText().trim();
+  let dates = [];
+  
+  // Check if it's a range
+  if (input.includes(' to ')) {
+    const parts = input.split(' to ').map(s => s.trim());
+    if (parts.length === 2) {
+      dates = generateDateRange_(parts[0], parts[1]);
+    }
+  } else {
+    // Comma-separated list
+    dates = input.split(',').map(s => s.trim()).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s));
+  }
+  
+  if (dates.length === 0) {
+    ui.alert('❌ Invalid Input', 'No valid dates found. Use YYYY-MM-DD format.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Confirm
+  const confirm = ui.alert(
+    '📥 Batch Regenerate',
+    `Found ${dates.length} date(s) to process:\n\n` +
+    dates.slice(0, 10).join(', ') + (dates.length > 10 ? '...' : '') + '\n\n' +
+    `This will search Gmail and save reports for each date.\n\n` +
+    `Proceed?`,
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirm !== ui.Button.YES) {
+    return;
+  }
+  
+  // Process each date
+  const results = { success: 0, failed: 0, errors: [] };
+  
+  for (const dateStr of dates) {
+    try {
+      const result = regenerateViolationsReportForDate_(dateStr);
+      if (result.success) {
+        results.success++;
+        Logger.log(`✅ ${dateStr}: ${result.filename}`);
+      } else {
+        results.failed++;
+        results.errors.push(`${dateStr}: ${result.error}`);
+        Logger.log(`❌ ${dateStr}: ${result.error}`);
+      }
+    } catch (error) {
+      results.failed++;
+      results.errors.push(`${dateStr}: ${error.toString()}`);
+      Logger.log(`❌ ${dateStr}: ${error}`);
+    }
+  }
+  
+  // Summary
+  let message = `Processed ${dates.length} date(s):\n\n`;
+  message += `✅ Success: ${results.success}\n`;
+  message += `❌ Failed: ${results.failed}\n`;
+  
+  if (results.errors.length > 0) {
+    message += `\nErrors:\n${results.errors.slice(0, 5).join('\n')}`;
+    if (results.errors.length > 5) {
+      message += `\n... and ${results.errors.length - 5} more`;
+    }
+  }
+  
+  ui.alert('📊 Batch Complete', message, ui.ButtonSet.OK);
+}
+
+/**
+ * Internal function to regenerate violations report for a specific date
+ * Returns: { success: boolean, filename: string, fileUrl: string, error: string }
+ */
+function regenerateViolationsReportForDate_(dateStr) {
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk'; // Raw Data folder
+  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  
+  // Get or create Violations Reports folder
+  let violationsReportsFolder;
+  const vFolders = rootFolder.getFoldersByName('Violations Reports');
+  if (vFolders.hasNext()) {
+    violationsReportsFolder = vFolders.next();
+  } else {
+    violationsReportsFolder = rootFolder.createFolder('Violations Reports');
+  }
+  
+  // Get or create month folder (YYYY-MM)
+  const yearMonth = dateStr.substring(0, 7); // "2025-11"
+  let monthFolder;
+  const mFolders = violationsReportsFolder.getFoldersByName(yearMonth);
+  if (mFolders.hasNext()) {
+    monthFolder = mFolders.next();
+  } else {
+    monthFolder = violationsReportsFolder.createFolder(yearMonth);
+  }
+  
+  // Search Gmail for the daily summary email
+  const searchQuery = `subject:"CM360 Daily QA Summary" after:${dateStr} before:${getNextDate_(dateStr)}`;
+  const threads = GmailApp.search(searchQuery);
+  
+  if (threads.length === 0) {
+    return {
+      success: false,
+      error: `No email found for ${dateStr}. Email may not exist or was sent with a different subject.`
+    };
+  }
+  
+  // Get the first thread (should be the only one for that date)
+  const messages = threads[0].getMessages();
+  if (messages.length === 0) {
+    return {
+      success: false,
+      error: `Thread found but no messages for ${dateStr}`
+    };
+  }
+  
+  // Get the latest message in the thread
+  const message = messages[messages.length - 1];
+  const htmlBody = message.getBody();
+  
+  // Extract violations table from HTML
+  const violationsData = extractViolationsFromHTML_(htmlBody);
+  
+  if (violationsData.length === 0) {
+    return {
+      success: false,
+      error: `No violations table found in email for ${dateStr}`
+    };
+  }
+  
+  // Create XLSX from violations data
+  const filename = `Violations_${dateStr}.xlsx`;
+  const xlsxBlob = createXLSXFromData_(violationsData, `Violations ${dateStr}`);
+  xlsxBlob.setName(filename);
+  
+  // Delete old file if exists
+  const existingFiles = monthFolder.getFilesByName(filename);
+  while (existingFiles.hasNext()) {
+    existingFiles.next().setTrashed(true);
+  }
+  
+  // Save file
+  const file = monthFolder.createFile(xlsxBlob);
+  const fileUrl = file.getUrl();
+  
+  Logger.log(`✅ Saved violations report: ${filename} (${violationsData.length - 1} violations)`);
+  
+  return {
+    success: true,
+    filename: filename,
+    folderPath: `Violations Reports/${yearMonth}`,
+    fileUrl: fileUrl,
+    violationCount: violationsData.length - 1
+  };
+}
+
+/**
+ * Extract violations table data from HTML email body
+ * Returns: [[headers], [row1], [row2], ...]
+ */
+function extractViolationsFromHTML_(htmlBody) {
+  const violations = [];
+  
+  // Look for the violations table (has specific headers)
+  const tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/gi;
+  let tableMatch;
+  
+  while ((tableMatch = tableRegex.exec(htmlBody)) !== null) {
+    const tableHTML = tableMatch[1];
+    
+    // Check if this is the violations table (look for "Advertiser" header)
+    if (!tableHTML.includes('Advertiser') || !tableHTML.includes('Placement')) {
+      continue;
+    }
+    
+    // Extract rows
+    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let rowMatch;
+    let isHeaderRow = true;
+    
+    while ((rowMatch = rowRegex.exec(tableHTML)) !== null) {
+      const rowHTML = rowMatch[1];
+      const cells = [];
+      
+      // Extract cells (th or td)
+      const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
+      let cellMatch;
+      
+      while ((cellMatch = cellRegex.exec(rowHTML)) !== null) {
+        let cellText = cellMatch[1];
+        // Strip HTML tags and decode entities
+        cellText = cellText.replace(/<[^>]+>/g, '').trim();
+        cellText = cellText.replace(/&nbsp;/g, ' ');
+        cellText = cellText.replace(/&amp;/g, '&');
+        cellText = cellText.replace(/&lt;/g, '<');
+        cellText = cellText.replace(/&gt;/g, '>');
+        cellText = cellText.replace(/&quot;/g, '"');
+        cells.push(cellText);
+      }
+      
+      if (cells.length > 0) {
+        violations.push(cells);
+      }
+    }
+    
+    // If we found a violations table, stop looking
+    if (violations.length > 0) {
+      break;
+    }
+  }
+  
+  return violations;
+}
+
+/**
+ * Helper: Get next date (for Gmail search range)
+ */
+function getNextDate_(dateStr) {
+  const date = new Date(dateStr);
+  date.setDate(date.getDate() + 1);
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+/**
+ * Helper: Generate date range
+ */
+function generateDateRange_(startDateStr, endDateStr) {
+  const dates = [];
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
+  
+  const current = new Date(start);
+  while (current <= end) {
+    dates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return dates;
+}
+
+/**
+ * Helper: Create XLSX from 2D array data
+ */
+function createXLSXFromData_(data, sheetName) {
+  // Create temporary spreadsheet
+  const tempSS = SpreadsheetApp.create('temp_violations_' + new Date().getTime());
+  const sheet = tempSS.getSheets()[0];
+  sheet.setName(sheetName);
+  
+  // Write data
+  if (data.length > 0) {
+    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+    
+    // Format header row
+    const headerRange = sheet.getRange(1, 1, 1, data[0].length);
+    headerRange.setFontWeight('bold');
+    headerRange.setBackground('#f0f0f0');
+  }
+  
+  // Convert to XLSX
+  const blob = DriveApp.getFileById(tempSS.getId()).getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  
+  // Delete temporary spreadsheet
+  DriveApp.getFileById(tempSS.getId()).setTrashed(true);
+  
+  return blob;
+}
+
+// =====================================================================================================================
+// ============================ END VIOLATIONS REPORT GAP-FILL SYSTEM =================================================
 // =====================================================================================================================
 
 
