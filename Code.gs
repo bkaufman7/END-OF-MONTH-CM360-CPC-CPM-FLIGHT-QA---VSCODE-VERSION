@@ -47,7 +47,11 @@ function onOpen() {
       .addSeparator()
       .addItem("📂 Categorize Files by Network", "categorizeRawDataByNetwork")
       .addItem("🔍 Audit Archive Completeness (Quick)", "auditRawDataArchive")
-      .addItem("🔬 Comprehensive Audit (Gmail vs Drive)", "auditRawDataArchiveComprehensive"))
+      .addItem("🔬 Comprehensive Audit (Gmail vs Drive)", "auditRawDataArchiveComprehensive")
+      .addSeparator()
+      .addItem("🔄 Resume Comprehensive Audit", "processComprehensiveAuditBatch_")
+      .addItem("📊 View Audit Progress", "viewComprehensiveAuditProgress")
+      .addItem("🔄 Reset Comprehensive Audit", "resetComprehensiveAudit"))
     .addToUi();
 }
 
@@ -3512,13 +3516,24 @@ function sendDailyProgressReport() {
 // ---------------------
 function autoResumeRawDataArchive() {
   const props = PropertiesService.getScriptProperties();
-  const stateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  const docProps = PropertiesService.getDocumentProperties();
+  const archiveStateJson = props.getProperty('RAW_ARCHIVE_STATE');
+  const auditStateJson = docProps.getProperty('comprehensive_audit_state');
   
-  if (!stateJson) {
-    return; // No archive in progress
+  // Check for comprehensive audit first
+  if (auditStateJson) {
+    const auditState = JSON.parse(auditStateJson);
+    Logger.log('Auto-resuming comprehensive audit...');
+    processComprehensiveAuditBatch_();
+    return;
   }
   
-  const state = JSON.parse(stateJson);
+  // Then check for archive
+  if (!archiveStateJson) {
+    return; // No archive or audit in progress
+  }
+  
+  const state = JSON.parse(archiveStateJson);
   
   if (state.status === 'completed') {
     // Archive complete, delete trigger
@@ -4249,9 +4264,31 @@ function renameFileWithNetworkName_(filename, networkId, networkName) {
 /**
  * COMPREHENSIVE AUDIT: Validates ALL attachments from Gmail are in Drive
  * Scans Gmail for expected files and compares to actual Drive contents
+ * Supports chunked execution with auto-resume
  */
 function auditRawDataArchiveComprehensive() {
   const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getDocumentProperties();
+  const stateKey = 'comprehensive_audit_state';
+  
+  // Check if audit is already in progress
+  const existingState = props.getProperty(stateKey);
+  if (existingState) {
+    const response = ui.alert(
+      '⏸️ Audit In Progress',
+      'An audit is already running.\n\n' +
+      'Continue from where it left off?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response !== ui.Button.YES) {
+      return;
+    }
+    
+    // Resume existing audit
+    processComprehensiveAuditBatch_();
+    return;
+  }
   
   const response = ui.alert(
     '🔍 Comprehensive Archive Audit',
@@ -4260,7 +4297,8 @@ function auditRawDataArchiveComprehensive() {
     '2. Count attachments per date/network in Gmail\n' +
     '3. Count actual files in Drive per date/network\n' +
     '4. Report any missing files\n\n' +
-    'This may take 15-20 minutes for 8,880 emails.\n\n' +
+    'Estimated time: Multiple 6-min runs (auto-resumes)\n' +
+    'Create auto-resume trigger recommended!\n\n' +
     'Proceed?',
     ui.ButtonSet.YES_NO
   );
@@ -4269,65 +4307,280 @@ function auditRawDataArchiveComprehensive() {
     return;
   }
   
-  ui.alert('Starting comprehensive audit...', 'This will run in the background. Check your email in ~20 minutes for results.', ui.ButtonSet.OK);
+  // Initialize state
+  const state = {
+    phase: 'gmail_scan',
+    gmailStartIndex: 0,
+    expectedFilesJson: '{}',
+    actualFilesJson: '{}',
+    startTime: new Date().toISOString()
+  };
+  
+  props.setProperty(stateKey, JSON.stringify(state));
+  
+  ui.alert(
+    '✅ Audit Started',
+    'Phase 1: Scanning Gmail\n\n' +
+    'Create an auto-resume trigger to continue automatically every 10 minutes.\n\n' +
+    'Menu → ARCHIVE TOOLS → Create Auto-Resume Trigger',
+    ui.ButtonSet.OK
+  );
+  
+  // Start first batch
+  processComprehensiveAuditBatch_();
+}
+
+/**
+ * Process one batch of comprehensive audit (called by trigger or manually)
+ */
+function processComprehensiveAuditBatch_() {
+  const props = PropertiesService.getDocumentProperties();
+  const stateKey = 'comprehensive_audit_state';
+  const stateJson = props.getProperty(stateKey);
+  
+  if (!stateJson) {
+    Logger.log('No audit in progress');
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  const startTime = new Date();
+  const MAX_EXECUTION_MS = 5 * 60 * 1000; // 5 minutes
   
   try {
-    // Step 1: Scan Gmail and build expected file map
-    Logger.log('Step 1: Scanning Gmail...');
-    const expectedFiles = scanGmailForExpectedFiles_();
-    Logger.log(`Found ${expectedFiles.size} expected date|network|filename combinations in Gmail`);
-    
-    // Step 2: Scan Drive and build actual file map
-    Logger.log('Step 2: Scanning Drive...');
-    const actualFiles = scanDriveForActualFiles_();
-    Logger.log(`Found ${actualFiles.size} actual files in Drive`);
-    
-    // Step 3: Compare and identify discrepancies
-    Logger.log('Step 3: Comparing Gmail vs Drive...');
-    const missingFiles = [];
-    const extraFiles = [];
-    
-    // Check for missing files (in Gmail but not Drive)
-    expectedFiles.forEach((filename, key) => {
-      if (!actualFiles.has(key)) {
-        const parts = key.split('|');
-        missingFiles.push({
-          date: parts[0],
-          networkId: parts[1],
-          filename: filename
-        });
+    if (state.phase === 'gmail_scan') {
+      Logger.log(`Gmail scan: Starting at index ${state.gmailStartIndex}`);
+      
+      // Continue Gmail scan
+      const expectedFiles = new Map(Object.entries(JSON.parse(state.expectedFilesJson)));
+      const result = scanGmailBatch_(state.gmailStartIndex, expectedFiles, startTime, MAX_EXECUTION_MS);
+      
+      state.expectedFilesJson = JSON.stringify(Object.fromEntries(result.expectedFiles));
+      state.gmailStartIndex = result.nextIndex;
+      
+      if (result.complete) {
+        Logger.log(`Gmail scan complete: ${result.expectedFiles.size} files found`);
+        state.phase = 'drive_scan';
+        state.driveYearIndex = 0;
       }
-    });
-    
-    // Check for extra files (in Drive but not Gmail)
-    actualFiles.forEach((filename, key) => {
-      if (!expectedFiles.has(key)) {
-        const parts = key.split('|');
-        extraFiles.push({
-          date: parts[0],
-          networkId: parts[1],
-          filename: filename
-        });
+      
+      props.setProperty(stateKey, JSON.stringify(state));
+      Logger.log(`Progress saved: ${state.phase}, Gmail index: ${state.gmailStartIndex}`);
+      
+    } else if (state.phase === 'drive_scan') {
+      Logger.log('Drive scan: Scanning folders...');
+      
+      // Scan Drive (usually completes in one run)
+      const actualFiles = scanDriveForActualFiles_();
+      state.actualFilesJson = JSON.stringify(Object.fromEntries(actualFiles));
+      state.phase = 'compare';
+      
+      props.setProperty(stateKey, JSON.stringify(state));
+      Logger.log(`Drive scan complete: ${actualFiles.size} files found`);
+      
+      // Continue to comparison immediately if time allows
+      if (new Date() - startTime < MAX_EXECUTION_MS) {
+        processComprehensiveAuditBatch_();
       }
-    });
-    
-    // Step 4: Send detailed report
-    sendComprehensiveAuditReport_(expectedFiles.size, actualFiles.size, missingFiles, extraFiles);
-    
-    Logger.log('✅ Comprehensive audit complete');
+      
+    } else if (state.phase === 'compare') {
+      Logger.log('Comparison phase: Analyzing differences...');
+      
+      const expectedFiles = new Map(Object.entries(JSON.parse(state.expectedFilesJson)));
+      const actualFiles = new Map(Object.entries(JSON.parse(state.actualFilesJson)));
+      
+      const missingFiles = [];
+      const extraFiles = [];
+      
+      // Check for missing files (in Gmail but not Drive)
+      expectedFiles.forEach((filename, key) => {
+        if (!actualFiles.has(key)) {
+          const parts = key.split('|');
+          missingFiles.push({
+            date: parts[0],
+            networkId: parts[1],
+            filename: filename
+          });
+        }
+      });
+      
+      // Check for extra files (in Drive but not Gmail)
+      actualFiles.forEach((filename, key) => {
+        if (!expectedFiles.has(key)) {
+          const parts = key.split('|');
+          extraFiles.push({
+            date: parts[0],
+            networkId: parts[1],
+            filename: filename
+          });
+        }
+      });
+      
+      // Send report
+      sendComprehensiveAuditReport_(expectedFiles.size, actualFiles.size, missingFiles, extraFiles);
+      
+      // Clean up state
+      props.deleteProperty(stateKey);
+      
+      Logger.log('✅ Comprehensive audit complete and email sent');
+    }
     
   } catch (error) {
-    Logger.log('Error in comprehensive audit: ' + error);
+    Logger.log('Error in audit batch: ' + error);
+    
+    // Send error email
     MailApp.sendEmail({
       to: Session.getActiveUser().getEmail(),
-      subject: '❌ Archive Audit Failed',
-      body: 'Error: ' + error.toString() + '\n\nCheck Apps Script logs for details.'
+      subject: '❌ Comprehensive Audit Error',
+      body: `Error in ${state.phase} phase: ${error.toString()}\n\nProgress saved. Run again to resume.`
     });
   }
 }
 
 /**
+ * Scan Gmail in batches with time limit
+ * Returns: { expectedFiles: Map, nextIndex: number, complete: boolean }
+ */
+function scanGmailBatch_(startIndex, expectedFiles, startTime, maxExecutionMs) {
+  const query = 'subject:"BKCM360 Global QA Check"';
+  const batchSize = 100;
+  let currentIndex = startIndex;
+  
+  while (true) {
+    // Check time limit
+    const elapsed = new Date() - startTime;
+    if (elapsed > maxExecutionMs) {
+      Logger.log(`Time limit reached at index ${currentIndex}`);
+      return { expectedFiles, nextIndex: currentIndex, complete: false };
+    }
+    
+    const threads = GmailApp.search(query, currentIndex, batchSize);
+    if (threads.length === 0) {
+      Logger.log(`Gmail scan complete at index ${currentIndex}`);
+      return { expectedFiles, nextIndex: currentIndex, complete: true };
+    }
+    
+    for (const thread of threads) {
+      const messages = thread.getMessages();
+      
+      for (const message of messages) {
+        const messageDate = message.getDate();
+        const dateStr = Utilities.formatDate(messageDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        const attachments = message.getAttachments();
+        
+        for (const attachment of attachments) {
+          const filename = attachment.getName();
+          const lowerFilename = filename.toLowerCase();
+          
+          // Only count CSV/XLSX files (or files inside ZIPs)
+          if (lowerFilename.endsWith('.zip')) {
+            const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+            if (networkId) {
+              try {
+                const zipBlob = attachment.copyBlob();
+                const unzipped = Utilities.unzip(zipBlob);
+                
+                for (const file of unzipped) {
+                  const unzippedName = file.getName().toLowerCase();
+                  if (unzippedName.endsWith('.csv') || unzippedName.endsWith('.xlsx')) {
+                    const key = `${dateStr}|${networkId}|${file.getName()}`;
+                    expectedFiles.set(key, file.getName());
+                  }
+                }
+              } catch (e) {
+                Logger.log(`Error unzipping ${filename}: ${e}`);
+              }
+            }
+          } else if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.xlsx')) {
+            const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+            if (networkId) {
+              const key = `${dateStr}|${networkId}|${filename}`;
+              expectedFiles.set(key, filename);
+            }
+          }
+        }
+      }
+    }
+    
+    currentIndex += batchSize;
+    
+    // Progress log every 500 emails
+    if (currentIndex % 500 === 0) {
+      Logger.log(`Scanned ${currentIndex} threads, found ${expectedFiles.size} expected files so far...`);
+    }
+    
+    // Safety limit
+    if (currentIndex > 20000) {
+      Logger.log('Hit safety limit of 20,000 threads');
+      return { expectedFiles, nextIndex: currentIndex, complete: true };
+    }
+  }
+}
+
+/**
+ * Reset comprehensive audit state
+ */
+function resetComprehensiveAudit() {
+  const props = PropertiesService.getDocumentProperties();
+  props.deleteProperty('comprehensive_audit_state');
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Audit Reset',
+    'Comprehensive audit state has been cleared.\n\nYou can start a new audit from the menu.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  
+  Logger.log('Comprehensive audit state reset');
+}
+
+/**
+ * View comprehensive audit progress
+ */
+function viewComprehensiveAuditProgress() {
+  const props = PropertiesService.getDocumentProperties();
+  const stateJson = props.getProperty('comprehensive_audit_state');
+  
+  if (!stateJson) {
+    SpreadsheetApp.getUi().alert(
+      'ℹ️ No Audit In Progress',
+      'There is no comprehensive audit currently running.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  const expectedCount = Object.keys(JSON.parse(state.expectedFilesJson)).length;
+  const actualCount = Object.keys(JSON.parse(state.actualFilesJson || '{}')).length;
+  
+  let message = `Phase: ${state.phase.toUpperCase()}\n\n`;
+  
+  if (state.phase === 'gmail_scan') {
+    message += `Gmail threads scanned: ${state.gmailStartIndex}\n`;
+    message += `Expected files found: ${expectedCount}\n\n`;
+    message += 'Status: Scanning emails for attachments...';
+  } else if (state.phase === 'drive_scan') {
+    message += `Expected files (from Gmail): ${expectedCount}\n`;
+    message += `Actual files (from Drive): ${actualCount}\n\n`;
+    message += 'Status: Scanning Drive folders...';
+  } else if (state.phase === 'compare') {
+    message += `Expected files: ${expectedCount}\n`;
+    message += `Actual files: ${actualCount}\n\n`;
+    message += 'Status: Comparing and generating report...';
+  }
+  
+  message += `\n\nStarted: ${new Date(state.startTime).toLocaleString()}`;
+  
+  SpreadsheetApp.getUi().alert(
+    '📊 Comprehensive Audit Progress',
+    message,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
  * Scans Gmail for all "BKCM360 Global QA Check" emails and builds expected file map
+ * LEGACY VERSION - Not used in chunked audit, kept for reference
  * Returns Map: "date|networkId|filename" => filename
  */
 function scanGmailForExpectedFiles_() {
