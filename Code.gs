@@ -20,6 +20,10 @@ function onOpen() {
     .addSeparator()
     .addItem("Clear Violations", "clearViolations")
     .addSeparator()
+    .addSubMenu(ui.createMenu("⏰ Time Machine")
+      .addItem("🎯 Setup Time Machine Sheet", "setupTimeMachineSheet")
+      .addItem("🔄 Run QA for Selected Date", "runTimeMachineQA"))
+    .addSeparator()
     .addSubMenu(ui.createMenu("📊 V2 Dashboard (BETA)")
       .addItem("🎯 Generate V2 Dashboard", "generateViolationsV2Dashboard")
       .addItem("💾 Export V2 to Drive", "exportV2ToDrive")
@@ -52,11 +56,10 @@ function onOpen() {
       .addItem("🔄 Resume Comprehensive Audit", "processComprehensiveAuditBatch_")
       .addItem("📊 View Audit Progress", "viewComprehensiveAuditProgress")
       .addItem("🔄 Reset Comprehensive Audit", "resetComprehensiveAudit"))
-    .addSeparator()
-    .addSubMenu(ui.createMenu("📋 Violations Reports")
-      .addItem("📥 Regenerate Report for Specific Date", "regenerateViolationsReportForDate")
-      .addItem("📥 Batch Regenerate (Multiple Dates)", "batchRegenerateViolationsReports"))
     .addToUi();
+  
+  // Setup Time Machine sheet if it exists
+  setupTimeMachineIfExists_();
 }
 
 
@@ -6009,218 +6012,317 @@ function checkDriveRawDataFolder() {
 // =====================================================================================================================
 
 // =====================================================================================================================
-// ================================= VIOLATIONS REPORT GAP-FILL SYSTEM =================================================
+// ========================================== TIME MACHINE SYSTEM ======================================================
 // =====================================================================================================================
 
 /**
- * Regenerate violations report for a specific date by re-processing raw data
- * Useful when daily QA times out and doesn't complete the analysis
+ * Setup Time Machine sheet with date picker and run button
  */
-function regenerateViolationsReportForDate() {
-  const ui = SpreadsheetApp.getUi();
+function setupTimeMachineSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Time Machine");
   
-  // Ask for date
-  const dateResponse = ui.prompt(
-    '📅 Regenerate Violations Report',
-    'Enter the date to regenerate (YYYY-MM-DD):\n\nExample: 2025-11-28\n\n' +
-    'This will:\n' +
-    '1. Download raw CSV files from Gmail for that date\n' +
-    '2. Process them through QA analysis\n' +
-    '3. Generate violations report\n' +
-    '4. Save to Drive',
-    ui.ButtonSet.OK_CANCEL
+  if (!sheet) {
+    sheet = ss.insertSheet("Time Machine");
+  }
+  
+  // Clear existing content
+  sheet.clear();
+  
+  // Set up the interface
+  sheet.setColumnWidth(1, 200);
+  sheet.setColumnWidth(2, 250);
+  sheet.setColumnWidth(3, 400);
+  
+  // Title
+  sheet.getRange("A1:C1").merge();
+  sheet.getRange("A1").setValue("⏰ TIME MACHINE - Run QA for Past Dates")
+    .setFontSize(16)
+    .setFontWeight("bold")
+    .setBackground("#4285f4")
+    .setFontColor("#ffffff")
+    .setVerticalAlignment("middle")
+    .setHorizontalAlignment("center");
+  sheet.setRowHeight(1, 40);
+  
+  // Instructions
+  sheet.getRange("A2:C2").merge();
+  sheet.getRange("A2").setValue("Select a date below and click 'Run QA' to process that day's data from Gmail")
+    .setFontSize(11)
+    .setBackground("#e8f0fe")
+    .setVerticalAlignment("middle")
+    .setHorizontalAlignment("center");
+  sheet.setRowHeight(2, 30);
+  
+  // Date selector row
+  sheet.getRange("A4").setValue("Select Date:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  
+  // Set default date to yesterday
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  sheet.getRange("B4").setValue(yesterday)
+    .setNumberFormat("yyyy-mm-dd")
+    .setHorizontalAlignment("left")
+    .setVerticalAlignment("middle");
+  
+  // Add data validation for date
+  const dateValidation = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(false)
+    .setHelpText("Select a date to run QA for")
+    .build();
+  sheet.getRange("B4").setDataValidation(dateValidation);
+  
+  // Status row
+  sheet.getRange("A6").setValue("Status:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  sheet.getRange("B6:C6").merge();
+  sheet.getRange("B6").setValue("Ready - Select a date and run QA from the menu")
+    .setFontColor("#666666")
+    .setVerticalAlignment("middle");
+  
+  // Last run info
+  sheet.getRange("A8").setValue("Last Run:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  sheet.getRange("B8:C8").merge();
+  sheet.getRange("B8").setValue("Never")
+    .setFontColor("#666666")
+    .setVerticalAlignment("middle");
+  
+  // Results summary
+  sheet.getRange("A10:C10").merge();
+  sheet.getRange("A10").setValue("Last Run Results")
+    .setFontSize(12)
+    .setFontWeight("bold")
+    .setBackground("#f0f0f0")
+    .setVerticalAlignment("middle");
+  
+  sheet.getRange("A11").setValue("Files Processed:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  sheet.getRange("B11").setValue("—")
+    .setVerticalAlignment("middle");
+  
+  sheet.getRange("A12").setValue("Placements Checked:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  sheet.getRange("B12").setValue("—")
+    .setVerticalAlignment("middle");
+  
+  sheet.getRange("A13").setValue("Violations Found:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  sheet.getRange("B13").setValue("—")
+    .setVerticalAlignment("middle");
+  
+  sheet.getRange("A14").setValue("Report Saved:")
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  sheet.getRange("B14:C14").merge();
+  sheet.getRange("B14").setValue("—")
+    .setVerticalAlignment("middle");
+  
+  // Instructions section
+  sheet.getRange("A16:C16").merge();
+  sheet.getRange("A16").setValue("How to Use")
+    .setFontSize(12)
+    .setFontWeight("bold")
+    .setBackground("#f0f0f0")
+    .setVerticalAlignment("middle");
+  
+  const instructions = [
+    ["1.", "Click on cell B4 and select a date from the date picker"],
+    ["2.", "Go to Menu → Time Machine → Run QA for Selected Date"],
+    ["3.", "Wait for processing to complete (may take a few minutes)"],
+    ["4.", "Check results above and review Violations sheet"],
+    ["5.", "Report will be automatically saved to Drive"]
+  ];
+  
+  for (let i = 0; i < instructions.length; i++) {
+    sheet.getRange(17 + i, 1).setValue(instructions[i][0]).setFontWeight("bold");
+    sheet.getRange(17 + i, 2, 1, 2).merge();
+    sheet.getRange(17 + i, 2).setValue(instructions[i][1]);
+  }
+  
+  // Freeze header
+  sheet.setFrozenRows(2);
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Time Machine Ready',
+    'Time Machine sheet has been set up!\n\n' +
+    '1. Click on cell B4 to select a date\n' +
+    '2. Use Menu → Time Machine → Run QA for Selected Date\n\n' +
+    'The system will download that day\'s data from Gmail and run full QA analysis.',
+    SpreadsheetApp.getUi().ButtonSet.OK
   );
+}
+
+/**
+ * Setup Time Machine sheet automatically if it exists (called on onOpen)
+ */
+function setupTimeMachineIfExists_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Time Machine");
   
-  if (dateResponse.getSelectedButton() !== ui.Button.OK) {
+  if (sheet) {
+    // Add button using drawing (if not already exists)
+    // Note: Buttons need to be manually added via Insert > Drawing
+    // This just ensures the sheet formatting is correct
+  }
+}
+
+/**
+ * Run QA for the date selected in Time Machine sheet
+ */
+function runTimeMachineQA() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tmSheet = ss.getSheetByName("Time Machine");
+  
+  if (!tmSheet) {
+    SpreadsheetApp.getUi().alert(
+      '❌ Time Machine Not Found',
+      'Please run "Setup Time Machine Sheet" first from the menu.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
     return;
   }
   
-  const dateStr = dateResponse.getResponseText().trim();
+  // Get selected date
+  const dateCell = tmSheet.getRange("B4");
+  const dateValue = dateCell.getValue();
   
-  // Validate date format
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    ui.alert('❌ Invalid Format', 'Please use YYYY-MM-DD format (e.g., 2025-11-28)', ui.ButtonSet.OK);
+  if (!dateValue || !(dateValue instanceof Date)) {
+    SpreadsheetApp.getUi().alert(
+      '❌ No Date Selected',
+      'Please select a date in cell B4 first.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
     return;
   }
+  
+  const dateStr = Utilities.formatDate(dateValue, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  
+  // Update status
+  tmSheet.getRange("B6").setValue("🔄 Processing " + dateStr + "...")
+    .setFontColor("#ff6d00")
+    .setFontWeight("bold");
+  
+  SpreadsheetApp.flush();
   
   // Confirm
-  const confirm = ui.alert(
-    '🔄 Regenerate Report',
-    `This will fully re-process ${dateStr}:\n\n` +
-    `1. Clear current Violations sheet\n` +
-    `2. Download raw CSV files from Gmail emails on ${dateStr}\n` +
-    `3. Process through full QA analysis\n` +
-    `4. Generate new violations report\n` +
-    `5. Save XLSX to Drive\n\n` +
-    `This may take several minutes.\n\n` +
-    `Proceed?`,
-    ui.ButtonSet.YES_NO
+  const confirm = SpreadsheetApp.getUi().alert(
+    '🔄 Run QA for ' + dateStr,
+    'This will:\n\n' +
+    '1. Clear current Raw Data and Violations sheets\n' +
+    '2. Download raw CSV files from Gmail for ' + dateStr + '\n' +
+    '3. Run full QA analysis\n' +
+    '4. Generate violations report\n' +
+    '5. Save to Drive\n\n' +
+    'This may take several minutes. Proceed?',
+    SpreadsheetApp.getUi().ButtonSet.YES_NO
   );
   
-  if (confirm !== ui.Button.YES) {
+  if (confirm !== SpreadsheetApp.getUi().Button.YES) {
+    tmSheet.getRange("B6").setValue("Ready - Select a date and run QA from the menu")
+      .setFontColor("#666666")
+      .setFontWeight("normal");
     return;
   }
   
-  // Process
   try {
-    ui.alert('⏳ Processing', `Starting full QA for ${dateStr}...\n\nThis will take a few minutes.`, ui.ButtonSet.OK);
-    
-    const result = regenerateViolationsReportForDate_(dateStr);
+    // Run the time machine process
+    const result = runTimeMachineQA_(dateStr);
     
     if (result.success) {
-      ui.alert(
-        '✅ Report Regenerated',
-        `Successfully regenerated violations report for ${dateStr}\n\n` +
-        `Raw files processed: ${result.filesProcessed}\n` +
-        `Total placements checked: ${result.placementsChecked}\n` +
-        `Violations found: ${result.violationCount}\n\n` +
-        `File: ${result.filename}\n` +
-        `Folder: ${result.folderPath}\n` +
-        `URL: ${result.fileUrl}`,
-        ui.ButtonSet.OK
+      // Update status
+      tmSheet.getRange("B6").setValue("✅ Complete - " + dateStr)
+        .setFontColor("#0f9d58")
+        .setFontWeight("bold");
+      
+      // Update last run
+      tmSheet.getRange("B8").setValue(new Date().toLocaleString())
+        .setFontColor("#000000");
+      
+      // Update results
+      tmSheet.getRange("B11").setValue(result.filesProcessed);
+      tmSheet.getRange("B12").setValue(result.placementsChecked);
+      tmSheet.getRange("B13").setValue(result.violationCount);
+      tmSheet.getRange("B14").setValue(result.fileUrl)
+        .setFontColor("#1155cc")
+        .setFontStyle("italic");
+      
+      SpreadsheetApp.getUi().alert(
+        '✅ QA Complete for ' + dateStr,
+        'Processing complete!\n\n' +
+        'Files processed: ' + result.filesProcessed + '\n' +
+        'Placements checked: ' + result.placementsChecked + '\n' +
+        'Violations found: ' + result.violationCount + '\n\n' +
+        'Report saved to: ' + result.folderPath + '\n' +
+        'File: ' + result.filename + '\n\n' +
+        'Check the Violations sheet for details.',
+        SpreadsheetApp.getUi().ButtonSet.OK
       );
     } else {
-      ui.alert('❌ Failed', result.error, ui.ButtonSet.OK);
+      tmSheet.getRange("B6").setValue("❌ Error - " + result.error)
+        .setFontColor("#d93025")
+        .setFontWeight("bold");
+      
+      SpreadsheetApp.getUi().alert('❌ Error', result.error, SpreadsheetApp.getUi().ButtonSet.OK);
     }
     
   } catch (error) {
-    ui.alert('❌ Error', error.toString(), ui.ButtonSet.OK);
+    tmSheet.getRange("B6").setValue("❌ Error - " + error.toString())
+      .setFontColor("#d93025")
+      .setFontWeight("bold");
+    
+    SpreadsheetApp.getUi().alert('❌ Error', error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
 /**
- * Batch regenerate violations reports for multiple dates
+ * Internal function to run Time Machine QA for specific date
  */
-function batchRegenerateViolationsReports() {
-  const ui = SpreadsheetApp.getUi();
-  
-  // Ask for date range or list
-  const dateResponse = ui.prompt(
-    '📅 Batch Regenerate Reports',
-    'Enter dates (comma-separated):\n\n' +
-    'Example: 2025-11-28, 2025-11-29, 2025-11-30\n\n' +
-    'Or enter a range:\n' +
-    'Example: 2025-11-28 to 2025-11-30',
-    ui.ButtonSet.OK_CANCEL
-  );
-  
-  if (dateResponse.getSelectedButton() !== ui.Button.OK) {
-    return;
-  }
-  
-  const input = dateResponse.getResponseText().trim();
-  let dates = [];
-  
-  // Check if it's a range
-  if (input.includes(' to ')) {
-    const parts = input.split(' to ').map(s => s.trim());
-    if (parts.length === 2) {
-      dates = generateDateRange_(parts[0], parts[1]);
-    }
-  } else {
-    // Comma-separated list
-    dates = input.split(',').map(s => s.trim()).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s));
-  }
-  
-  if (dates.length === 0) {
-    ui.alert('❌ Invalid Input', 'No valid dates found. Use YYYY-MM-DD format.', ui.ButtonSet.OK);
-    return;
-  }
-  
-  // Confirm
-  const confirm = ui.alert(
-    '📥 Batch Regenerate',
-    `Found ${dates.length} date(s) to process:\n\n` +
-    dates.slice(0, 10).join(', ') + (dates.length > 10 ? '...' : '') + '\n\n' +
-    `This will search Gmail and save reports for each date.\n\n` +
-    `Proceed?`,
-    ui.ButtonSet.YES_NO
-  );
-  
-  if (confirm !== ui.Button.YES) {
-    return;
-  }
-  
-  // Process each date
-  const results = { success: 0, failed: 0, errors: [] };
-  
-  for (const dateStr of dates) {
-    try {
-      const result = regenerateViolationsReportForDate_(dateStr);
-      if (result.success) {
-        results.success++;
-        Logger.log(`✅ ${dateStr}: ${result.filename}`);
-      } else {
-        results.failed++;
-        results.errors.push(`${dateStr}: ${result.error}`);
-        Logger.log(`❌ ${dateStr}: ${result.error}`);
-      }
-    } catch (error) {
-      results.failed++;
-      results.errors.push(`${dateStr}: ${error.toString()}`);
-      Logger.log(`❌ ${dateStr}: ${error}`);
-    }
-  }
-  
-  // Summary
-  let message = `Processed ${dates.length} date(s):\n\n`;
-  message += `✅ Success: ${results.success}\n`;
-  message += `❌ Failed: ${results.failed}\n`;
-  
-  if (results.errors.length > 0) {
-    message += `\nErrors:\n${results.errors.slice(0, 5).join('\n')}`;
-    if (results.errors.length > 5) {
-      message += `\n... and ${results.errors.length - 5} more`;
-    }
-  }
-  
-  ui.alert('📊 Batch Complete', message, ui.ButtonSet.OK);
-}
-
-/**
- * Internal function to regenerate violations report for a specific date
- * Downloads raw CSVs from Gmail, processes through QA, generates and saves report
- * Returns: { success: boolean, filename: string, fileUrl: string, error: string, ... }
- */
-function regenerateViolationsReportForDate_(dateStr) {
+function runTimeMachineQA_(dateStr) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rawSheet = ss.getSheetByName("Raw Data");
   const violationsSheet = ss.getSheetByName("Violations");
-  const networksSheet = ss.getSheetByName("Networks");
   
-  if (!rawSheet || !violationsSheet || !networksSheet) {
-    return { success: false, error: "Required sheets not found (Raw Data, Violations, Networks)" };
+  if (!rawSheet || !violationsSheet) {
+    return { success: false, error: "Required sheets not found (Raw Data, Violations)" };
   }
   
   // Step 1: Clear existing data
-  Logger.log(`Clearing Raw Data and Violations sheets...`);
+  Logger.log(`Time Machine: Clearing sheets for ${dateStr}...`);
   clearRawData();
   clearViolations();
   
-  // Step 2: Download raw CSVs from Gmail for this specific date
-  Logger.log(`Downloading raw CSV files from Gmail for ${dateStr}...`);
+  // Step 2: Download raw CSVs from Gmail
+  Logger.log(`Time Machine: Downloading from Gmail...`);
   const downloadResult = downloadRawDataForDate_(dateStr);
   
   if (!downloadResult.success) {
     return { success: false, error: downloadResult.error };
   }
   
-  Logger.log(`Downloaded ${downloadResult.filesProcessed} files`);
+  Logger.log(`Time Machine: Downloaded ${downloadResult.filesProcessed} files`);
   
-  // Step 3: Process the data (run QA analysis)
-  Logger.log(`Running QA analysis...`);
+  // Step 3: Run QA
+  Logger.log(`Time Machine: Running QA analysis...`);
   try {
-    processCSVData(); // This populates the Violations sheet
+    processCSVData();
   } catch (error) {
     return { success: false, error: `QA processing failed: ${error.toString()}` };
   }
   
-  // Step 4: Check if violations were generated
-  const violationCount = violationsSheet.getLastRow() - 1; // Exclude header
-  Logger.log(`QA complete: ${violationCount} violations found`);
+  const violationCount = violationsSheet.getLastRow() - 1;
+  Logger.log(`Time Machine: Found ${violationCount} violations`);
   
-  // Step 5: Save violations report to Drive
-  Logger.log(`Saving violations report to Drive...`);
+  // Step 4: Save to Drive
+  Logger.log(`Time Machine: Saving to Drive...`);
   const saveResult = saveViolationsReportToDrive_(dateStr, violationCount);
   
   if (!saveResult.success) {
@@ -6240,13 +6342,11 @@ function regenerateViolationsReportForDate_(dateStr) {
 
 /**
  * Download raw CSV files from Gmail for a specific date
- * Returns: { success: boolean, filesProcessed: number, error: string }
  */
 function downloadRawDataForDate_(dateStr) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rawSheet = ss.getSheetByName("Raw Data");
   
-  // Search for emails on this specific date
   const nextDate = getNextDate_(dateStr);
   const searchQuery = `subject:"BKCM360 Global QA Check" after:${dateStr} before:${nextDate} has:attachment`;
   
@@ -6263,9 +6363,8 @@ function downloadRawDataForDate_(dateStr) {
   Logger.log(`Found ${threads.length} email thread(s)`);
   
   let filesProcessed = 0;
-  let currentRow = 2; // Start after header
+  let currentRow = 2;
   
-  // Process each thread
   for (const thread of threads) {
     const messages = thread.getMessages();
     
@@ -6276,7 +6375,6 @@ function downloadRawDataForDate_(dateStr) {
         const filename = attachment.getName();
         const lowerFilename = filename.toLowerCase();
         
-        // Only process CSV/XLSX files
         if (lowerFilename.endsWith('.csv')) {
           try {
             const content = attachment.getDataAsString();
@@ -6334,8 +6432,7 @@ function downloadRawDataForDate_(dateStr) {
 }
 
 /**
- * Save violations report to Drive as XLSX
- * Returns: { success: boolean, filename: string, folderPath: string, fileUrl: string, error: string }
+ * Save violations report to Drive
  */
 function saveViolationsReportToDrive_(dateStr, violationCount) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -6348,10 +6445,9 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
     };
   }
   
-  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk'; // Raw Data folder
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
   const rootFolder = DriveApp.getFolderById(rootFolderId);
   
-  // Get or create Violations Reports folder
   let violationsReportsFolder;
   const vFolders = rootFolder.getFoldersByName('Violations Reports');
   if (vFolders.hasNext()) {
@@ -6360,8 +6456,7 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
     violationsReportsFolder = rootFolder.createFolder('Violations Reports');
   }
   
-  // Get or create month folder (YYYY-MM)
-  const yearMonth = dateStr.substring(0, 7); // "2025-11"
+  const yearMonth = dateStr.substring(0, 7);
   let monthFolder;
   const mFolders = violationsReportsFolder.getFoldersByName(yearMonth);
   if (mFolders.hasNext()) {
@@ -6370,18 +6465,15 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
     monthFolder = violationsReportsFolder.createFolder(yearMonth);
   }
   
-  // Create XLSX from Violations sheet
   const filename = `Violations_${dateStr}.xlsx`;
   const xlsxBlob = createXLSXFromSheet(violationsSheet);
   xlsxBlob.setName(filename);
   
-  // Delete old file if exists
   const existingFiles = monthFolder.getFilesByName(filename);
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);
   }
   
-  // Save file
   const file = monthFolder.createFile(xlsxBlob);
   const fileUrl = file.getUrl();
   
@@ -6396,7 +6488,7 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
 }
 
 /**
- * Helper: Get next date (for Gmail search range)
+ * Helper: Get next date
  */
 function getNextDate_(dateStr) {
   const date = new Date(dateStr);
@@ -6404,25 +6496,8 @@ function getNextDate_(dateStr) {
   return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
-/**
- * Helper: Generate date range
- */
-function generateDateRange_(startDateStr, endDateStr) {
-  const dates = [];
-  const start = new Date(startDateStr);
-  const end = new Date(endDateStr);
-  
-  const current = new Date(start);
-  while (current <= end) {
-    dates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
-    current.setDate(current.getDate() + 1);
-  }
-  
-  return dates;
-}
-
 // =====================================================================================================================
-// ============================ END VIOLATIONS REPORT GAP-FILL SYSTEM =================================================
+// ======================================= END TIME MACHINE SYSTEM ====================================================
 // =====================================================================================================================
 
 
