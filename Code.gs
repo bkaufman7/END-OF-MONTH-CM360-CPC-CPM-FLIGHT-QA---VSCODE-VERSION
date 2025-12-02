@@ -25,6 +25,29 @@ function onOpen() {
       .addItem("🔄 Reset Raw Data Audit", "resetRawDataAudit"))
     .addSeparator()
     
+    // === RAW DATA GAP FILL ===
+    .addSubMenu(ui.createMenu("📦 Raw Data Gap Fill")
+      .addItem("🔄 Start Raw Data Gap Fill", "startRawDataGapFill")
+      .addItem("📊 View Status", "viewRawDataGapFillStatus")
+      .addSeparator()
+      .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createRawGapFillAutoResumeTrigger")
+      .addItem("🛑 Stop & Delete Trigger", "stopRawDataGapFillAndDeleteTrigger")
+      .addSeparator()
+      .addItem("🔄 Reset (Start Over)", "resetRawDataGapFill"))
+    .addSeparator()
+    
+    // === VIOLATIONS GAP FILL ===
+    .addSubMenu(ui.createMenu("🔧 Violations Gap Fill")
+      .addItem("🎯 Setup Progress Sheet", "setupGapFillProgressSheet")
+      .addItem("🔄 Start Auto Gap Fill", "startAutoGapFill")
+      .addItem("📊 View Status", "viewGapFillStatus")
+      .addSeparator()
+      .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createGapFillAutoResumeTrigger")
+      .addItem("🛑 Stop & Delete Trigger", "stopGapFillAndDeleteTrigger")
+      .addSeparator()
+      .addItem("🔄 Reset (Start Over)", "resetGapFill"))
+    .addSeparator()
+    
     // === TIME MACHINE ===
     .addSubMenu(ui.createMenu("⏰ Time Machine")
       .addItem("🎯 Setup Time Machine", "setupTimeMachineSheet")
@@ -74,18 +97,6 @@ function onOpen() {
       .addItem("🕒 Create Daily Email Trigger (9am)", "createDailyEmailTrigger")
       .addSeparator()
       .addItem("🧹 Clear Violations", "clearViolations"))
-    .addSeparator()
-    
-    // === GAP FILL AUTOMATION ===
-    .addSubMenu(ui.createMenu("🔧 Gap Fill Automation")
-      .addItem("🎯 Setup Gap Fill Progress Sheet", "setupGapFillProgressSheet")
-      .addItem("🔄 Start Auto Gap Fill", "startAutoGapFill")
-      .addItem("📊 View Gap Fill Status", "viewGapFillStatus")
-      .addSeparator()
-      .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createGapFillAutoResumeTrigger")
-      .addItem("🛑 Stop Gap Fill & Delete Trigger", "stopGapFillAndDeleteTrigger")
-      .addSeparator()
-      .addItem("🔄 Reset Gap Fill (Start Over)", "resetGapFill"))
     .addToUi();
   
   // Setup Time Machine sheet if it exists
@@ -6749,7 +6760,8 @@ function generateRawDataAuditReport_(sheet, dateData, allNetworks) {
         0,
         0,
         'All networks',
-        'Use Time Machine'
+        'Use Time Machine',
+        '' // Notes column
       ]);
       missingCount++;
     } else {
@@ -6769,7 +6781,8 @@ function generateRawDataAuditReport_(sheet, dateData, allNetworks) {
           data.files,
           foundNetworks,
           '—',
-          '—'
+          '—',
+          '' // Notes column
         ]);
         completeCount++;
       } else {
@@ -6779,7 +6792,8 @@ function generateRawDataAuditReport_(sheet, dateData, allNetworks) {
           data.files,
           foundNetworks,
           missingNetworks.join(', '),
-          'Use Gap-Fill'
+          'Use Gap-Fill',
+          '' // Notes column
         ]);
         partialCount++;
       }
@@ -6788,12 +6802,12 @@ function generateRawDataAuditReport_(sheet, dateData, allNetworks) {
   
   // Clear existing data (keep headers)
   if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).clear();
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).clear();
   }
   
   // Write data
   if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
     
     // Format status column
     for (let i = 0; i < rows.length; i++) {
@@ -6812,7 +6826,7 @@ function generateRawDataAuditReport_(sheet, dateData, allNetworks) {
   
   // Add summary at top
   sheet.insertRowBefore(1);
-  sheet.getRange(1, 1, 1, 6).merge();
+  sheet.getRange(1, 1, 1, 7).merge();
   sheet.getRange(1, 1).setValue(
     `📊 Archive Audit Summary: ${completeCount} Complete | ${partialCount} Partial | ${missingCount} Missing | Total: ${allDates.length} days`
   )
@@ -6860,13 +6874,14 @@ function setupAuditDashboard() {
   sheet.setColumnWidth(4, 150); // Networks Found
   sheet.setColumnWidth(5, 300); // Missing Networks
   sheet.setColumnWidth(6, 200); // Action
+  sheet.setColumnWidth(7, 300); // Notes
   
   // Headers
   const headers = [
-    ["Date", "Status", "Files in Drive", "Networks Found", "Missing Networks", "Action"]
+    ["Date", "Status", "Files in Drive", "Networks Found", "Missing Networks", "Action", "Notes"]
   ];
   
-  sheet.getRange(1, 1, 1, 6).setValues(headers)
+  sheet.getRange(1, 1, 1, 7).setValues(headers)
     .setFontWeight("bold")
     .setBackground("#4285f4")
     .setFontColor("#ffffff")
@@ -7975,7 +7990,502 @@ function stopGapFillAndDeleteTrigger() {
 }
 
 // =====================================================================================================================
-// ======================================= END AUTO GAP FILL SYSTEM ===================================================
+// ======================================= END AUTO GAP FILL SYSTEM (VIOLATIONS) ======================================
+// =====================================================================================================================
+
+
+// =====================================================================================================================
+// ================================= RAW DATA GAP FILL SYSTEM ==========================================================
+// =====================================================================================================================
+
+// Constants for Raw Data Gap Fill
+const RAW_GAP_FILL_STATE_KEY = 'raw_gap_fill_state';
+const RAW_GAP_FILL_TRIGGER_KEY = 'raw_gap_fill_trigger_id';
+const RAW_GAP_FILL_TIME_BUDGET_MS = 5.5 * 60 * 1000; // 5.5 minutes
+const RAW_DATA_ROOT_FOLDER_ID = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+
+/**
+ * Get missing items from Audit Dashboard
+ * Returns array of { date, networks: [] }
+ */
+function getMissingRawDataFromAudit_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet) {
+    throw new Error("Audit Dashboard sheet not found. Run the audit first.");
+  }
+  
+  const data = sheet.getDataRange().getValues();
+  const missing = [];
+  
+  // Start from row 3 (skip summary and headers)
+  for (let i = 2; i < data.length; i++) {
+    const dateStr = data[i][0];
+    const status = data[i][1];
+    const missingNetworks = data[i][4];
+    
+    if (!dateStr || typeof dateStr !== 'string') continue;
+    
+    // Only process MISSING or PARTIAL statuses
+    if (status === '❌ MISSING' || status === '⚠️ PARTIAL') {
+      let networksList = [];
+      
+      if (status === '❌ MISSING') {
+        // Get all networks for this date
+        const networksSheet = ss.getSheetByName("Networks");
+        if (networksSheet) {
+          const networkData = networksSheet.getDataRange().getValues();
+          for (let j = 1; j < networkData.length; j++) {
+            const netId = String(networkData[j][0] || '').trim();
+            if (netId) networksList.push(netId);
+          }
+        }
+      } else if (status === '⚠️ PARTIAL' && missingNetworks) {
+        // Parse missing networks from column
+        networksList = String(missingNetworks).split(',').map(n => n.trim()).filter(n => n);
+      }
+      
+      if (networksList.length > 0) {
+        missing.push({
+          date: dateStr,
+          networks: networksList,
+          status: status
+        });
+      }
+    }
+  }
+  
+  return missing;
+}
+
+/**
+ * Update Audit Dashboard Notes column (Column G)
+ */
+function updateRawDataAuditNotes_(dateStr, message) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet) return;
+  
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 2; i < data.length; i++) {
+    if (data[i][0] === dateStr) {
+      // Column G = index 6
+      sheet.getRange(i + 1, 7).setValue(message);
+      break;
+    }
+  }
+}
+
+/**
+ * Get/Save/Clear state for Raw Data Gap Fill
+ */
+function getRawGapFillState_() {
+  const props = PropertiesService.getDocumentProperties();
+  const stateJson = props.getProperty(RAW_GAP_FILL_STATE_KEY);
+  return stateJson ? JSON.parse(stateJson) : null;
+}
+
+function saveRawGapFillState_(state) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty(RAW_GAP_FILL_STATE_KEY, JSON.stringify(state));
+}
+
+function clearRawGapFillState_() {
+  const props = PropertiesService.getDocumentProperties();
+  props.deleteProperty(RAW_GAP_FILL_STATE_KEY);
+}
+
+/**
+ * Download raw data CSVs for a specific date and network
+ * Returns { success: boolean, filesFound: number, errorMsg: string }
+ */
+function downloadRawDataForDateNetwork_(dateStr, networkId) {
+  try {
+    // Format date for email search (MM.DD.YY)
+    const dateParts = dateStr.split('-');
+    const month = dateParts[1];
+    const day = dateParts[2];
+    const year = dateParts[0].substring(2);
+    const emailDateStr = `${month}.${day}.${year}`;
+    
+    // Search Gmail for the raw data email
+    const searchQuery = `subject:"BKCM360 Global QA Check ${emailDateStr}" has:attachment`;
+    Logger.log(`Searching Gmail: ${searchQuery}`);
+    
+    const threads = GmailApp.search(searchQuery, 0, 1);
+    
+    if (threads.length === 0) {
+      return { success: false, filesFound: 0, errorMsg: 'Email not found' };
+    }
+    
+    const messages = threads[0].getMessages();
+    let filesFound = 0;
+    
+    for (const message of messages) {
+      const attachments = message.getAttachments();
+      
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        
+        // Check if this file belongs to the target network
+        if (filename.includes(`_${networkId}_`) || filename.includes(`_${networkId}.`)) {
+          // Save to Drive
+          const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
+          if (saved) {
+            filesFound++;
+          }
+        }
+      }
+    }
+    
+    if (filesFound > 0) {
+      return { success: true, filesFound: filesFound, errorMsg: null };
+    } else {
+      return { success: false, filesFound: 0, errorMsg: `No files for network ${networkId}` };
+    }
+    
+  } catch (e) {
+    Logger.log(`Error downloading raw data for ${dateStr} / ${networkId}: ${e}`);
+    return { success: false, filesFound: 0, errorMsg: e.toString() };
+  }
+}
+
+/**
+ * Save raw data file to Drive with proper folder structure
+ * Path: 2025/MM-Month/YYYY-MM-DD/filename
+ */
+function saveRawDataFileToDrive_(dateStr, networkId, attachment, originalFilename) {
+  try {
+    const rootFolder = DriveApp.getFolderById(RAW_DATA_ROOT_FOLDER_ID);
+    
+    // Get or create 2025 folder
+    let yearFolder;
+    const yearFolders = rootFolder.getFoldersByName('2025');
+    if (yearFolders.hasNext()) {
+      yearFolder = yearFolders.next();
+    } else {
+      yearFolder = rootFolder.createFolder('2025');
+    }
+    
+    // Parse date for folder structure
+    const dateParts = dateStr.split('-');
+    const monthNum = dateParts[1];
+    const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthName = monthNames[parseInt(monthNum)];
+    const monthFolderName = `${monthNum}-${monthName}`;
+    
+    // Get or create month folder
+    let monthFolder;
+    const monthFolders = yearFolder.getFoldersByName(monthFolderName);
+    if (monthFolders.hasNext()) {
+      monthFolder = monthFolders.next();
+    } else {
+      monthFolder = yearFolder.createFolder(monthFolderName);
+    }
+    
+    // Get or create date folder
+    let dateFolder;
+    const dateFolders = monthFolder.getFoldersByName(dateStr);
+    if (dateFolders.hasNext()) {
+      dateFolder = dateFolders.next();
+    } else {
+      dateFolder = monthFolder.createFolder(dateStr);
+    }
+    
+    // Check if file already exists
+    const existingFiles = dateFolder.getFilesByName(originalFilename);
+    if (existingFiles.hasNext()) {
+      Logger.log(`File already exists: ${originalFilename}`);
+      return true; // Consider it saved
+    }
+    
+    // Save the file
+    const blob = attachment.copyBlob();
+    dateFolder.createFile(blob.setName(originalFilename));
+    
+    Logger.log(`✅ Saved: ${dateStr} / ${networkId} / ${originalFilename}`);
+    return true;
+    
+  } catch (e) {
+    Logger.log(`Error saving file to Drive: ${e}`);
+    return false;
+  }
+}
+
+/**
+ * Start Raw Data Gap Fill
+ */
+function startRawDataGapFill() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Check if already running
+  const existingState = getRawGapFillState_();
+  if (existingState && existingState.status === 'running') {
+    const response = ui.alert(
+      '⚠️ Gap Fill In Progress',
+      'Raw data gap fill is already running.\n\nDo you want to continue from where it left off?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      processRawDataGapFillChunk_();
+      return;
+    } else {
+      return;
+    }
+  }
+  
+  // Get missing items from audit
+  const missing = getMissingRawDataFromAudit_();
+  
+  if (missing.length === 0) {
+    ui.alert('✅ No Gaps Found', 'All raw data is complete!', ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Build queue: expand each date's networks into separate items
+  const queue = [];
+  for (const item of missing) {
+    for (const networkId of item.networks) {
+      queue.push({
+        date: item.date,
+        network: networkId,
+        status: 'pending'
+      });
+    }
+  }
+  
+  // Initialize state
+  const state = {
+    status: 'running',
+    queue: queue,
+    currentIndex: 0,
+    startTime: new Date().toISOString(),
+    processed: 0,
+    successful: 0,
+    failed: 0
+  };
+  
+  saveRawGapFillState_(state);
+  
+  ui.alert(
+    '🚀 Raw Data Gap Fill Started',
+    `Found ${queue.length} missing date/network combinations.\n\n` +
+    `Processing will begin now and update the Audit Dashboard Notes column.\n\n` +
+    `Create an auto-resume trigger to run automatically every 10 minutes.`,
+    ui.ButtonSet.OK
+  );
+  
+  // Start processing
+  processRawDataGapFillChunk_();
+}
+
+/**
+ * Process a chunk of raw data gap fill
+ */
+function processRawDataGapFillChunk_() {
+  const startTime = Date.now();
+  const state = getRawGapFillState_();
+  
+  if (!state) {
+    Logger.log('No raw data gap fill state found');
+    return;
+  }
+  
+  if (state.status !== 'running') {
+    Logger.log('Raw data gap fill not running');
+    return;
+  }
+  
+  const queue = state.queue;
+  
+  while (state.currentIndex < queue.length) {
+    // Check time budget
+    if ((Date.now() - startTime) >= RAW_GAP_FILL_TIME_BUDGET_MS) {
+      Logger.log(`⏸️ Time budget reached. Processed ${state.processed}/${queue.length}`);
+      saveRawGapFillState_(state);
+      
+      SpreadsheetApp.getUi().alert(
+        '⏸️ Gap Fill Paused',
+        `Time limit reached. Progress saved.\n\n` +
+        `Processed: ${state.processed}/${queue.length}\n` +
+        `Successful: ${state.successful}\n` +
+        `Failed: ${state.failed}\n\n` +
+        `Run again to continue.`,
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+      return;
+    }
+    
+    const item = queue[state.currentIndex];
+    const dateStr = item.date;
+    const networkId = item.network;
+    
+    Logger.log(`Processing: ${dateStr} / ${networkId}`);
+    updateRawDataAuditNotes_(dateStr, `⏳ Processing network ${networkId}...`);
+    
+    // Try to download from Gmail
+    const result = downloadRawDataForDateNetwork_(dateStr, networkId);
+    
+    if (result.success) {
+      item.status = 'success';
+      state.successful++;
+      updateRawDataAuditNotes_(dateStr, `✅ Downloaded ${result.filesFound} file(s) for ${networkId}`);
+      Logger.log(`✅ Success: ${dateStr} / ${networkId} - ${result.filesFound} files`);
+    } else {
+      item.status = 'failed';
+      state.failed++;
+      updateRawDataAuditNotes_(dateStr, `❌ Failed: ${result.errorMsg}`);
+      Logger.log(`❌ Failed: ${dateStr} / ${networkId} - ${result.errorMsg}`);
+    }
+    
+    state.processed++;
+    state.currentIndex++;
+    
+    // Save state periodically
+    if (state.processed % 5 === 0) {
+      saveRawGapFillState_(state);
+    }
+  }
+  
+  // All done
+  state.status = 'completed';
+  state.endTime = new Date().toISOString();
+  saveRawGapFillState_(state);
+  
+  const elapsed = (Date.now() - startTime) / 1000;
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Raw Data Gap Fill Complete',
+    `Finished processing ${state.processed} items in ${elapsed.toFixed(1)}s.\n\n` +
+    `Successful: ${state.successful}\n` +
+    `Failed: ${state.failed}\n\n` +
+    `Check the Audit Dashboard Notes column for details.\n` +
+    `Re-run the Raw Data Audit to update statuses.`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  
+  // Auto-delete trigger if exists
+  deleteRawGapFillAutoResumeTrigger_();
+}
+
+/**
+ * View Raw Data Gap Fill status
+ */
+function viewRawDataGapFillStatus() {
+  const state = getRawGapFillState_();
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!state) {
+    ui.alert('📊 Gap Fill Status', 'No gap fill in progress.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const progress = state.queue.length > 0 ? ((state.processed / state.queue.length) * 100).toFixed(1) : 0;
+  
+  ui.alert(
+    '📊 Raw Data Gap Fill Status',
+    `Status: ${state.status}\n\n` +
+    `Progress: ${state.processed}/${state.queue.length} (${progress}%)\n` +
+    `Successful: ${state.successful}\n` +
+    `Failed: ${state.failed}\n\n` +
+    `Started: ${new Date(state.startTime).toLocaleString()}`,
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Reset Raw Data Gap Fill
+ */
+function resetRawDataGapFill() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    '⚠️ Reset Raw Data Gap Fill',
+    'This will clear all progress and start over.\n\nAre you sure?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    clearRawGapFillState_();
+    ui.alert('✅ Reset Complete', 'Raw data gap fill has been reset.', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Create Auto-Resume Trigger for Raw Data Gap Fill
+ */
+function createRawGapFillAutoResumeTrigger() {
+  deleteRawGapFillAutoResumeTrigger_();
+  
+  const trigger = ScriptApp.newTrigger('processRawDataGapFillChunk_')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+  
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(RAW_GAP_FILL_TRIGGER_KEY, trigger.getUniqueId());
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Auto-Resume Trigger Created',
+    'Raw data gap fill will automatically resume every 10 minutes.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Delete Raw Data Gap Fill Auto-Resume Trigger
+ */
+function deleteRawGapFillAutoResumeTrigger_() {
+  const props = PropertiesService.getScriptProperties();
+  const triggerId = props.getProperty(RAW_GAP_FILL_TRIGGER_KEY);
+  
+  if (triggerId) {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getUniqueId() === triggerId) {
+        ScriptApp.deleteTrigger(trigger);
+        break;
+      }
+    }
+    props.deleteProperty(RAW_GAP_FILL_TRIGGER_KEY);
+  }
+}
+
+/**
+ * Stop Raw Data Gap Fill and Delete Trigger
+ */
+function stopRawDataGapFillAndDeleteTrigger() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    '🛑 Stop Raw Data Gap Fill',
+    'This will stop the gap fill process and delete the auto-resume trigger.\n\nProgress will be saved.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    deleteRawGapFillAutoResumeTrigger_();
+    
+    const state = getRawGapFillState_();
+    if (state && state.status === 'running') {
+      state.status = 'paused';
+      saveRawGapFillState_(state);
+    }
+    
+    ui.alert(
+      '✅ Stopped',
+      'Raw data gap fill stopped and trigger deleted.\n\n' +
+      'Run "Start Raw Data Gap Fill" to resume.',
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+// =====================================================================================================================
+// ======================================= END RAW DATA GAP FILL SYSTEM ===============================================
 // =====================================================================================================================
 
 
