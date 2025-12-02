@@ -8312,28 +8312,32 @@ function clearRawGapFillState_() {
  */
 function downloadRawDataForDateNetwork_(dateStr, networkId) {
   try {
-    // Convert date to YYYYMMDD format for filename matching
-    const filenameDateStr = dateStr.replace(/-/g, ''); // 2025-05-11 -> 20250511
+    // The report date in Audit Dashboard is when the email was sent (e.g., May 11)
+    // BUT the filename contains the DATA date which is the previous day (e.g., May 10)
+    // So for dateStr = "2025-05-11", we need to look for files with "20250510" in the name
+    
+    const targetDate = new Date(dateStr);
+    
+    // Calculate the data date (day before target date)
+    const dataDate = new Date(targetDate);
+    dataDate.setDate(dataDate.getDate() - 1);
+    const filenameDateStr = Utilities.formatDate(dataDate, Session.getScriptTimeZone(), 'yyyyMMdd');
+    
+    Logger.log(`Looking for ${dateStr} data (filename date: ${filenameDateStr})`);
     
     // Search Gmail for raw data emails (subject has no date)
     const searchQuery = `subject:"BKCM360 Global QA Check" has:attachment`;
-    Logger.log(`Searching Gmail: ${searchQuery}`);
     
-    // Search emails within ±1 day of target date (emails arrive same day, but allow small buffer)
-    const targetDate = new Date(dateStr);
-    const startDate = new Date(targetDate);
-    startDate.setDate(startDate.getDate() - 1);
-    const endDate = new Date(targetDate);
-    endDate.setDate(endDate.getDate() + 1);
-    
-    const dateFilter = `after:${Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'yyyy/MM/dd')} before:${Utilities.formatDate(endDate, Session.getScriptTimeZone(), 'yyyy/MM/dd')}`;
+    // Search emails on the target date (when they were sent)
+    const searchDate = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    const dateFilter = `on:${searchDate}`;
     const fullQuery = `${searchQuery} ${dateFilter}`;
-    Logger.log(`Full search: ${fullQuery}`);
+    Logger.log(`Gmail search: ${fullQuery}`);
     
-    const threads = GmailApp.search(fullQuery, 0, 10); // Get up to 10 emails (should be plenty for ±1 day)
+    const threads = GmailApp.search(fullQuery, 0, 10);
     
     if (threads.length === 0) {
-      return { success: false, filesFound: 0, errorMsg: 'No emails found in date range' };
+      return { success: false, filesFound: 0, errorMsg: 'No emails found on target date' };
     }
     
     let filesFound = 0;
@@ -8345,30 +8349,25 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
       for (const message of messages) {
         const attachments = message.getAttachments();
         
-        Logger.log(`Email has ${attachments.length} attachments`);
-        
         for (const attachment of attachments) {
           const filename = attachment.getName();
-          Logger.log(`  Checking attachment: ${filename}`);
           
-          // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}.zip
-          // Check if filename matches our network AND date
+          // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}.{csv|zip}
+          // Check if filename matches our network AND data date
           if (filename.startsWith(`${networkId}_`) && filename.includes(`_${filenameDateStr}_`)) {
-            Logger.log(`  ✅ MATCH! Network ${networkId}, Date ${filenameDateStr}`);
+            Logger.log(`  ✅ MATCH: ${filename}`);
             // Save to Drive
             const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
             if (saved) {
               filesFound++;
             }
-          } else {
-            Logger.log(`  ❌ No match. Expected: ${networkId}_*_${filenameDateStr}_*`);
           }
         }
       }
     }
     
     if (filesFound === 0) {
-      return { success: false, filesFound: 0, errorMsg: `No files found for network ${networkId} on ${filenameDateStr}` };
+      return { success: false, filesFound: 0, errorMsg: `No files found for network ${networkId} with data date ${filenameDateStr}` };
     }
     
     return { success: true, filesFound, errorMsg: '' };
