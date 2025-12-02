@@ -8019,13 +8019,29 @@ function getMissingRawDataFromAudit_() {
   const data = sheet.getDataRange().getValues();
   const missing = [];
   
-  // Start from row 3 (skip summary and headers)
-  for (let i = 2; i < data.length; i++) {
-    const dateStr = data[i][0];
-    const status = data[i][1];
-    const missingNetworks = data[i][4];
+  // Find where data starts (skip summary row and header row)
+  let startRow = 0;
+  for (let i = 0; i < data.length; i++) {
+    const cellValue = String(data[i][0] || '').trim();
+    // Look for YYYY-MM-DD format (first data row)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cellValue)) {
+      startRow = i;
+      break;
+    }
+  }
+  
+  if (startRow === 0) {
+    Logger.log('No date data found in Audit Dashboard');
+    return [];
+  }
+  
+  // Process data rows
+  for (let i = startRow; i < data.length; i++) {
+    const dateStr = String(data[i][0] || '').trim();
+    const status = String(data[i][1] || '').trim();
+    const missingNetworks = String(data[i][4] || '').trim();
     
-    if (!dateStr || typeof dateStr !== 'string') continue;
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
     
     // Only process MISSING or PARTIAL statuses
     if (status === '❌ MISSING' || status === '⚠️ PARTIAL') {
@@ -8041,9 +8057,9 @@ function getMissingRawDataFromAudit_() {
             if (netId) networksList.push(netId);
           }
         }
-      } else if (status === '⚠️ PARTIAL' && missingNetworks) {
+      } else if (status === '⚠️ PARTIAL' && missingNetworks && missingNetworks !== '—') {
         // Parse missing networks from column
-        networksList = String(missingNetworks).split(',').map(n => n.trim()).filter(n => n);
+        networksList = missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '—');
       }
       
       if (networksList.length > 0) {
@@ -8056,6 +8072,7 @@ function getMissingRawDataFromAudit_() {
     }
   }
   
+  Logger.log(`Found ${missing.length} dates with missing/partial data`);
   return missing;
 }
 
@@ -8070,10 +8087,12 @@ function updateRawDataAuditNotes_(dateStr, message) {
   
   const data = sheet.getDataRange().getValues();
   
-  for (let i = 2; i < data.length; i++) {
-    if (data[i][0] === dateStr) {
-      // Column G = index 6
+  for (let i = 0; i < data.length; i++) {
+    const cellValue = String(data[i][0] || '').trim();
+    if (cellValue === dateStr) {
+      // Column G = index 6 (0-based), row is i+1 (1-based)
       sheet.getRange(i + 1, 7).setValue(message);
+      SpreadsheetApp.flush(); // Force immediate update
       break;
     }
   }
