@@ -6866,36 +6866,27 @@ function refreshViolationsAudit() {
   
   // Scan Drive for Violations Reports
   const driveData = {}; // date => { filename, url }
-  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
-  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  const violationsFolderId = '1lJm0K1LLo9ez29AcKCc4qtIbBC2uK3a9';
+  const violationsRoot = DriveApp.getFolderById(violationsFolderId);
   
-  const violationsFolders = rootFolder.getFoldersByName('Violations Reports');
-  if (violationsFolders.hasNext()) {
-    const violationsRoot = violationsFolders.next();
-    const yearFolders = violationsRoot.getFolders();
+  const monthFolders = violationsRoot.getFolders();
+  
+  while (monthFolders.hasNext()) {
+    const monthFolder = monthFolders.next();
+    const files = monthFolder.getFiles();
     
-    while (yearFolders.hasNext()) {
-      const yearFolder = yearFolders.next();
-      const monthFolders = yearFolder.getFolders();
+    while (files.hasNext()) {
+      const file = files.next();
+      const filename = file.getName();
       
-      while (monthFolders.hasNext()) {
-        const monthFolder = monthFolders.next();
-        const files = monthFolder.getFiles();
-        
-        while (files.hasNext()) {
-          const file = files.next();
-          const filename = file.getName();
-          
-          // Extract date from filename (e.g., "CM360_Violations_2025-05-15.xlsx")
-          const dateMatch = filename.match(/(\d{4}-\d{2}-\d{2})/);
-          if (dateMatch) {
-            const dateStr = dateMatch[1];
-            driveData[dateStr] = {
-              filename: filename,
-              url: file.getUrl()
-            };
-          }
-        }
+      // Extract date from filename (e.g., "CM360_Violations_2025-05-15.xlsx")
+      const dateMatch = filename.match(/(\d{4}-\d{2}-\d{2})/);
+      if (dateMatch) {
+        const dateStr = dateMatch[1];
+        driveData[dateStr] = {
+          filename: filename,
+          url: file.getUrl()
+        };
       }
     }
   }
