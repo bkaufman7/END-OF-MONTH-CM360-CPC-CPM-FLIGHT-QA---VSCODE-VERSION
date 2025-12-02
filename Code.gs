@@ -8035,11 +8035,16 @@ function analyzeNetworkLifecycle_() {
     const cellValue = String(data[i][0] || '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(cellValue)) {
       startRow = i;
+      Logger.log(`Found data starting at row ${i}: ${cellValue}`);
       break;
     }
   }
   
-  if (startRow === 0) return {};
+  if (startRow === 0) {
+    Logger.log(`Could not find date data. Total rows: ${data.length}`);
+    Logger.log(`First 5 rows, column A: ${data.slice(0, 5).map(r => r[0]).join(', ')}`);
+    return {};
+  }
   
   // Scan all dates to find when each network is EXPECTED (found OR missing means expected)
   for (let i = startRow; i < data.length; i++) {
@@ -8163,12 +8168,14 @@ function getMissingRawDataFromAudit_() {
     // Look for YYYY-MM-DD format (first data row)
     if (/^\d{4}-\d{2}-\d{2}$/.test(cellValue)) {
       startRow = i;
+      Logger.log(`Found data starting at row ${i}: ${cellValue}`);
       break;
     }
   }
   
   if (startRow === 0) {
-    Logger.log('No date data found in Audit Dashboard');
+    Logger.log(`Could not find date data in getMissingRawDataFromAudit_. Total rows: ${data.length}`);
+    Logger.log(`First 10 rows, column A: ${data.slice(0, 10).map(r => String(r[0] || '').trim()).join(', ')}`);
     return [];
   }
 
