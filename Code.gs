@@ -6981,6 +6981,71 @@ function refreshViolationsAudit() {
 // =================================== END VIOLATIONS AUDIT DASHBOARD =================================================
 // =====================================================================================================================
 
+// =====================================================================================================================
+// ========================================== DRIVE FOLDER CRAWLER ====================================================
+// =====================================================================================================================
+
+/**
+ * Crawl a Drive folder and log its structure
+ */
+function crawlDriveFolder() {
+  const folderId = '1uOXQ-zgCZ5-d9E2ewR-XO11c1sperj5S';
+  const folder = DriveApp.getFolderById(folderId);
+  
+  Logger.log('=== DRIVE FOLDER STRUCTURE ===');
+  Logger.log('Root: ' + folder.getName());
+  Logger.log('');
+  
+  crawlFolder_(folder, 0);
+  
+  SpreadsheetApp.getUi().alert(
+    'Folder Crawl Complete',
+    'Check the execution log (View > Logs) to see the folder structure.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+function crawlFolder_(folder, depth) {
+  const indent = '  '.repeat(depth);
+  
+  // List subfolders
+  const subfolders = folder.getFolders();
+  const folderList = [];
+  while (subfolders.hasNext()) {
+    folderList.push(subfolders.next());
+  }
+  
+  // List files
+  const files = folder.getFiles();
+  const fileList = [];
+  while (files.hasNext()) {
+    fileList.push(files.next());
+  }
+  
+  Logger.log(indent + '📁 ' + folder.getName() + ' (' + folderList.length + ' folders, ' + fileList.length + ' files)');
+  
+  // Show sample files (first 3)
+  for (let i = 0; i < Math.min(3, fileList.length); i++) {
+    Logger.log(indent + '  📄 ' + fileList[i].getName());
+  }
+  if (fileList.length > 3) {
+    Logger.log(indent + '  ... and ' + (fileList.length - 3) + ' more files');
+  }
+  
+  // Recurse into subfolders (max depth 3)
+  if (depth < 3) {
+    for (const subfolder of folderList) {
+      crawlFolder_(subfolder, depth + 1);
+    }
+  } else if (folderList.length > 0) {
+    Logger.log(indent + '  [' + folderList.length + ' subfolders not shown - max depth reached]');
+  }
+}
+
+// =====================================================================================================================
+// ======================================== END DRIVE FOLDER CRAWLER ==================================================
+// =====================================================================================================================
+
 
 
 // ======================================= END HISTORICAL ARCHIVE SYSTEM ===============================================
