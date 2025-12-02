@@ -10,34 +10,35 @@
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu("CM360 QA Tools")
-    .addItem("Run It All", "runItAll")
-    .addItem("Pull Data", "importDCMReports")
-    .addItem("Run QA Only", "runQAOnly")
-    .addItem("Send Email Only", "sendEmailSummary")
+    // === DAILY OPERATIONS ===
+    .addItem("▶️ Run It All", "runItAll")
+    .addItem("📥 Pull Data", "importDCMReports")
+    .addItem("🔍 Run QA Only", "runQAOnly")
+    .addItem("📧 Send Email Only", "sendEmailSummary")
     .addSeparator()
-    .addItem("Authorize Email (one-time)", "authorizeMail_")
-    .addItem("Create Daily Email Trigger (9am)", "createDailyEmailTrigger")
+    
+    // === ARCHIVE AUDITS ===
+    .addSubMenu(ui.createMenu("📋 Archive Audits")
+      .addItem("📊 Raw Data Audit (Check Drive)", "setupAndRefreshRawDataAudit")
+      .addItem("📧 Violations Audit (Gmail + Drive)", "setupAndRefreshViolationsAudit"))
     .addSeparator()
-    .addItem("Clear Violations", "clearViolations")
-    .addSeparator()
+    
+    // === TIME MACHINE ===
     .addSubMenu(ui.createMenu("⏰ Time Machine")
-      .addItem("🎯 Setup Time Machine Sheet", "setupTimeMachineSheet")
+      .addItem("🎯 Setup Time Machine", "setupTimeMachineSheet")
       .addItem("🔄 Run QA for Selected Date", "runTimeMachineQA"))
     .addSeparator()
-    .addSubMenu(ui.createMenu("📋 Audit Dashboard")
-      .addItem("🎯 Setup Raw Data Audit", "setupAuditDashboard")
-      .addItem("🔄 Refresh Raw Data Audit", "refreshAuditDashboard")
-      .addSeparator()
-      .addItem("📊 Setup Violations Audit", "setupViolationsAudit")
-      .addItem("🔄 Refresh Violations Audit", "refreshViolationsAudit"))
-    .addSeparator()
-    .addSubMenu(ui.createMenu("📊 V2 Dashboard (BETA)")
+    
+    // === REPORTS & DASHBOARDS ===
+    .addSubMenu(ui.createMenu("📊 Reports & Dashboards")
       .addItem("🎯 Generate V2 Dashboard", "generateViolationsV2Dashboard")
       .addItem("💾 Export V2 to Drive", "exportV2ToDrive")
       .addItem("📊 Monthly Summary Report", "generateMonthlySummaryReport")
       .addItem("📈 Month-over-Month Analysis", "runMonthOverMonthAnalysis")
       .addItem("💰 Calculate Financial Impact", "displayFinancialImpact"))
     .addSeparator()
+    
+    // === HISTORICAL ARCHIVE ===
     .addSubMenu(ui.createMenu("📁 Historical Archive")
       .addItem("📁 Archive All (April-Nov 2025)", "archiveAllHistoricalReports")
       .addItem("📅 Archive Single Month", "archiveSingleMonth")
@@ -63,6 +64,14 @@ function onOpen() {
       .addItem("🔄 Resume Comprehensive Audit", "processComprehensiveAuditBatch_")
       .addItem("📊 View Audit Progress", "viewComprehensiveAuditProgress")
       .addItem("🔄 Reset Comprehensive Audit", "resetComprehensiveAudit"))
+    .addSeparator()
+    
+    // === UTILITIES ===
+    .addSubMenu(ui.createMenu("⚙️ Settings & Utilities")
+      .addItem("🔓 Authorize Email (one-time)", "authorizeMail_")
+      .addItem("🕒 Create Daily Email Trigger (9am)", "createDailyEmailTrigger")
+      .addSeparator()
+      .addItem("🧹 Clear Violations", "clearViolations"))
     .addToUi();
   
   // Setup Time Machine sheet if it exists
@@ -6524,6 +6533,22 @@ function getNextDate_(dateStr) {
 // =====================================================================================================================
 
 /**
+ * Combined function to setup and refresh Raw Data audit in one click
+ */
+function setupAndRefreshRawDataAudit() {
+  setupAuditDashboard();
+  refreshAuditDashboard();
+}
+
+/**
+ * Combined function to setup and refresh Violations audit in one click
+ */
+function setupAndRefreshViolationsAudit() {
+  setupViolationsAudit();
+  refreshViolationsAudit();
+}
+
+/**
  * Setup Audit Dashboard sheet with date tracking
  */
 function setupAuditDashboard() {
@@ -6567,7 +6592,8 @@ function setupAuditDashboard() {
 }
 
 /**
- * Refresh audit dashboard by scanning Drive
+ * Refresh audit dashboard by scanning Drive ONLY
+ * This shows which dates are missing from your Drive repository
  */
 function refreshAuditDashboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -6576,14 +6602,14 @@ function refreshAuditDashboard() {
   if (!sheet) {
     SpreadsheetApp.getUi().alert(
       '❌ Dashboard Not Found',
-      'Please run "Setup Audit Dashboard" first.',
+      'Please run "Raw Data Audit" first.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     return;
   }
   
   const ui = SpreadsheetApp.getUi();
-  ui.alert('🔄 Scanning Drive', 'Scanning your Drive folder structure...\n\nThis may take a minute.', ui.ButtonSet.OK);
+  ui.alert('🔄 Scanning Drive Only', 'Scanning Drive to find missing dates...\n\nThis may take a minute.', ui.ButtonSet.OK);
   
   // Get all networks
   const networksSheet = ss.getSheetByName("Networks");
@@ -6747,11 +6773,12 @@ function refreshAuditDashboard() {
   sheet.setRowHeight(1, 35);
   
   ui.alert(
-    '✅ Audit Complete',
-    `Scanned ${allDates.length} dates:\n\n` +
+    '✅ Drive Audit Complete',
+    `Scanned ${allDates.length} dates in Drive:\n\n` +
     `✅ Complete: ${completeCount}\n` +
     `⚠️ Partial: ${partialCount}\n` +
     `❌ Missing: ${missingCount}\n\n` +
+    `Missing/partial dates need to be re-pulled using Time Machine.\n\n` +
     `Check the Audit Dashboard sheet for details.`,
     ui.ButtonSet.OK
   );
