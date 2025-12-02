@@ -19,8 +19,8 @@ function onOpen() {
     
     // === ARCHIVE AUDITS ===
     .addSubMenu(ui.createMenu("📋 Archive Audits")
-      .addItem("📊 Raw Data Audit (Check Drive)", "setupAndRefreshRawDataAudit")
-      .addItem("📧 Violations Audit (Gmail + Drive)", "setupAndRefreshViolationsAudit"))
+      .addItem("📊 Raw Data Audit (Drive)", "setupAndRefreshRawDataAudit")
+      .addItem("📧 Violations Audit (Drive)", "setupAndRefreshViolationsAudit"))
     .addSeparator()
     
     // === TIME MACHINE ===
@@ -6606,6 +6606,7 @@ function setupAuditDashboard() {
 /**
  * Refresh audit dashboard by scanning Drive ONLY
  * This shows which dates are missing from your Drive repository
+ * Uses chunking to handle large datasets
  */
 function refreshAuditDashboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -6621,7 +6622,8 @@ function refreshAuditDashboard() {
   }
   
   const ui = SpreadsheetApp.getUi();
-  ui.alert('🔄 Scanning Drive Only', 'Scanning Drive to find missing dates...\n\nThis may take a minute.', ui.ButtonSet.OK);
+  const startTime = Date.now();
+  const TIME_BUDGET_MS = 5 * 60 * 1000; // 5 minutes
   
   // Get all networks
   const networksSheet = ss.getSheetByName("Networks");
@@ -6643,17 +6645,17 @@ function refreshAuditDashboard() {
   
   const dateData = {}; // date => { files: count, networks: Set }
   
-  // Scan Raw Data folders
+  // Scan Raw Data folders with time budget check
   const yearFolders = rootFolder.getFoldersByName('2025');
   if (yearFolders.hasNext()) {
     const yearFolder = yearFolders.next();
     const monthFolders = yearFolder.getFolders();
     
-    while (monthFolders.hasNext()) {
+    while (monthFolders.hasNext() && (Date.now() - startTime) < TIME_BUDGET_MS) {
       const monthFolder = monthFolders.next();
       const dateFolders = monthFolder.getFolders();
       
-      while (dateFolders.hasNext()) {
+      while (dateFolders.hasNext() && (Date.now() - startTime) < TIME_BUDGET_MS) {
         const dateFolder = dateFolders.next();
         const dateStr = dateFolder.getName(); // e.g., "2025-05-01"
         
@@ -6784,9 +6786,11 @@ function refreshAuditDashboard() {
   
   sheet.setRowHeight(1, 35);
   
+  const elapsed = (Date.now() - startTime) / 1000;
+  
   ui.alert(
     '✅ Drive Audit Complete',
-    `Scanned ${allDates.length} dates in Drive:\n\n` +
+    `Scanned ${allDates.length} dates in Drive (${elapsed.toFixed(1)}s):\n\n` +
     `✅ Complete: ${completeCount}\n` +
     `⚠️ Partial: ${partialCount}\n` +
     `❌ Missing: ${missingCount}\n\n` +
