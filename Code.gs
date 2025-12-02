@@ -6808,16 +6808,15 @@ function setupViolationsAudit() {
   // Set up columns
   sheet.setColumnWidth(1, 120); // Date
   sheet.setColumnWidth(2, 100); // Status
-  sheet.setColumnWidth(3, 200); // Gmail Subject
-  sheet.setColumnWidth(4, 200); // Drive File
-  sheet.setColumnWidth(5, 200); // Drive URL
+  sheet.setColumnWidth(3, 250); // Drive File
+  sheet.setColumnWidth(4, 200); // Drive URL
   
   // Headers
   const headers = [
-    ["Date", "Status", "Gmail Attachment", "Drive File", "Drive URL"]
+    ["Date", "Status", "Drive File", "Drive URL"]
   ];
   
-  sheet.getRange(1, 1, 1, 5).setValues(headers)
+  sheet.getRange(1, 1, 1, 4).setValues(headers)
     .setFontWeight("bold")
     .setBackground("#f4b400")
     .setFontColor("#ffffff")
@@ -6829,13 +6828,14 @@ function setupViolationsAudit() {
   SpreadsheetApp.getUi().alert(
     '✅ Violations Audit Ready',
     'Violations Audit sheet created!\n\n' +
-    'Click "Refresh Violations Audit" from the menu to scan Gmail and Drive.',
+    'Click "Violations Audit" from the menu to scan Drive and populate the dashboard.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
 
 /**
- * Refresh violations audit by scanning Gmail and Drive
+ * Refresh violations audit by scanning Drive ONLY
+ * Shows which dates have violations reports saved and which are missing
  */
 function refreshViolationsAudit() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -6844,14 +6844,14 @@ function refreshViolationsAudit() {
   if (!sheet) {
     SpreadsheetApp.getUi().alert(
       '❌ Dashboard Not Found',
-      'Please run "Setup Violations Audit" first.',
+      'Please run "Violations Audit" first.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     return;
   }
   
   const ui = SpreadsheetApp.getUi();
-  ui.alert('🔄 Scanning Gmail & Drive', 'Scanning for Historical Violation Reports...\n\nThis may take a minute.', ui.ButtonSet.OK);
+  ui.alert('🔄 Scanning Drive Only', 'Scanning Drive for Violations Reports...\n\nThis may take a minute.', ui.ButtonSet.OK);
   
   // Generate date range (April 1 - November 30, 2025)
   const startDate = new Date('2025-04-01');
@@ -6862,33 +6862,6 @@ function refreshViolationsAudit() {
   while (current <= endDate) {
     allDates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
     current.setDate(current.getDate() + 1);
-  }
-  
-  // Scan Gmail for Historical Violation Reports
-  const gmailData = {}; // date => { subject, hasAttachment }
-  
-  for (const dateStr of allDates) {
-    const dateObj = new Date(dateStr);
-    const nextDate = new Date(dateObj);
-    nextDate.setDate(nextDate.getDate() + 1);
-    const nextDateStr = Utilities.formatDate(nextDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    
-    // Search for Historical Violation Report email
-    const query = `subject:"BKCM360 Historical Violation Report" after:${dateStr} before:${nextDateStr}`;
-    const threads = GmailApp.search(query, 0, 1);
-    
-    if (threads.length > 0) {
-      const msgs = threads[0].getMessages();
-      for (const msg of msgs) {
-        const attachments = msg.getAttachments();
-        gmailData[dateStr] = {
-          subject: msg.getSubject(),
-          hasAttachment: attachments.length > 0,
-          attachmentName: attachments.length > 0 ? attachments[0].getName() : null
-        };
-        break;
-      }
-    }
   }
   
   // Scan Drive for Violations Reports
@@ -6930,15 +6903,23 @@ function refreshViolationsAudit() {
   // Build rows
   const rows = [];
   let missingCount = 0;
-  let gmailOnlyCount = 0;
-  let completeCount = 0;
+  let foundCount = 0;
   
   for (const dateStr of allDates) {
-    const gmail = gmailData[dateStr];
     const drive = driveData[dateStr];
     
-    if (!gmail && !drive) {
-      // No email, no drive file
+    if (drive) {
+      // File exists in Drive
+      rows.push([
+        dateStr,
+        '✅ FOUND',
+        '—',
+        drive.filename,
+        drive.url
+      ]);
+      foundCount++;
+    } else {
+      // Missing from Drive
       rows.push([
         dateStr,
         '❌ MISSING',
@@ -6947,36 +6928,6 @@ function refreshViolationsAudit() {
         '—'
       ]);
       missingCount++;
-    } else if (gmail && !drive) {
-      // Email exists but not saved to Drive
-      rows.push([
-        dateStr,
-        '⚠️ GMAIL ONLY',
-        gmail.attachmentName || 'No attachment',
-        '—',
-        '—'
-      ]);
-      gmailOnlyCount++;
-    } else if (!gmail && drive) {
-      // Drive file exists but no email (manually uploaded?)
-      rows.push([
-        dateStr,
-        '✅ IN DRIVE',
-        '—',
-        drive.filename,
-        drive.url
-      ]);
-      completeCount++;
-    } else {
-      // Both exist
-      rows.push([
-        dateStr,
-        '✅ COMPLETE',
-        gmail.attachmentName || 'Unknown',
-        drive.filename,
-        drive.url
-      ]);
-      completeCount++;
     }
   }
   
@@ -6994,10 +6945,8 @@ function refreshViolationsAudit() {
       const statusCell = sheet.getRange(i + 2, 2);
       const status = rows[i][1];
       
-      if (status === '✅ COMPLETE' || status === '✅ IN DRIVE') {
+      if (status === '✅ FOUND') {
         statusCell.setBackground('#d4edda').setFontColor('#155724');
-      } else if (status === '⚠️ GMAIL ONLY') {
-        statusCell.setBackground('#fff3cd').setFontColor('#856404');
       } else if (status === '❌ MISSING') {
         statusCell.setBackground('#f8d7da').setFontColor('#721c24');
       }
@@ -7017,7 +6966,7 @@ function refreshViolationsAudit() {
   sheet.insertRowBefore(1);
   sheet.getRange(1, 1, 1, 5).merge();
   sheet.getRange(1, 1).setValue(
-    `📊 Violations Report Audit: ${completeCount} Complete | ${gmailOnlyCount} Gmail Only | ${missingCount} Missing | Total: ${allDates.length} days`
+    `📊 Violations Report Audit (Drive Only): ${foundCount} Found | ${missingCount} Missing | Total: ${allDates.length} days`
   )
     .setFontSize(12)
     .setFontWeight("bold")
@@ -7029,9 +6978,8 @@ function refreshViolationsAudit() {
   
   ui.alert(
     '✅ Violations Audit Complete',
-    `Scanned ${allDates.length} dates (Apr 1 - Nov 30, 2025):\n\n` +
-    `✅ Complete: ${completeCount}\n` +
-    `⚠️ Gmail Only: ${gmailOnlyCount}\n` +
+    `Scanned ${allDates.length} dates in Drive (Apr 1 - Nov 30, 2025):\n\n` +
+    `✅ Found: ${foundCount}\n` +
     `❌ Missing: ${missingCount}\n\n` +
     `Check the Violations Audit sheet for details.`,
     ui.ButtonSet.OK
