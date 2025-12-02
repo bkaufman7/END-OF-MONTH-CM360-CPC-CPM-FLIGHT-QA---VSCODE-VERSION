@@ -6853,15 +6853,26 @@ function refreshViolationsAudit() {
   const ui = SpreadsheetApp.getUi();
   ui.alert('🔄 Scanning Drive Only', 'Scanning Drive for Violations Reports...\n\nThis may take a minute.', ui.ButtonSet.OK);
   
-  // Generate date range (April 1 - November 30, 2025)
-  const startDate = new Date('2025-04-01');
-  const endDate = new Date('2025-11-30');
+  // Generate date range (April 15 - November 30, 2025)
+  // Violations reports only send from 15th-31st of each month
   const allDates = [];
   
-  const current = new Date(startDate);
-  while (current <= endDate) {
-    allDates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
-    current.setDate(current.getDate() + 1);
+  const months = [
+    { year: 2025, month: 4, start: 15, end: 30 },  // April 15-30
+    { year: 2025, month: 5, start: 15, end: 31 },  // May 15-31
+    { year: 2025, month: 6, start: 15, end: 30 },  // June 15-30
+    { year: 2025, month: 7, start: 15, end: 31 },  // July 15-31
+    { year: 2025, month: 8, start: 15, end: 31 },  // August 15-31
+    { year: 2025, month: 9, start: 15, end: 30 },  // September 15-30
+    { year: 2025, month: 10, start: 15, end: 31 }, // October 15-31
+    { year: 2025, month: 11, start: 15, end: 30 }  // November 15-30
+  ];
+  
+  for (const monthInfo of months) {
+    for (let day = monthInfo.start; day <= monthInfo.end; day++) {
+      const dateStr = `${monthInfo.year}-${String(monthInfo.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      allDates.push(dateStr);
+    }
   }
   
   // Scan Drive for Violations Reports
@@ -6957,7 +6968,7 @@ function refreshViolationsAudit() {
   sheet.insertRowBefore(1);
   sheet.getRange(1, 1, 1, 5).merge();
   sheet.getRange(1, 1).setValue(
-    `📊 Violations Report Audit (Drive Only): ${foundCount} Found | ${missingCount} Missing | Total: ${allDates.length} days`
+    `📊 Violations Report Audit (Drive Only): ${foundCount} Found | ${missingCount} Missing | Total: ${allDates.length} days (15th-31st only)`
   )
     .setFontSize(12)
     .setFontWeight("bold")
@@ -6969,7 +6980,7 @@ function refreshViolationsAudit() {
   
   ui.alert(
     '✅ Violations Audit Complete',
-    `Scanned ${allDates.length} dates in Drive (Apr 1 - Nov 30, 2025):\n\n` +
+    `Scanned ${allDates.length} dates in Drive (15th-31st, Apr-Nov 2025):\n\n` +
     `✅ Found: ${foundCount}\n` +
     `❌ Missing: ${missingCount}\n\n` +
     `Check the Violations Audit sheet for details.`,
