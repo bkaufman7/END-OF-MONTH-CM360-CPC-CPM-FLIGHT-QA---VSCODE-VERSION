@@ -8006,7 +8006,8 @@ const RAW_DATA_ROOT_FOLDER_ID = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
 
 /**
  * Analyze network lifecycle from Audit Dashboard
- * Returns map of { networkId: { firstSeen: 'YYYY-MM-DD', lastSeen: 'YYYY-MM-DD', activeDates: Set } }
+ * Tracks BOTH found and missing networks to understand when each network is expected
+ * Returns map of { networkId: { firstExpected: 'YYYY-MM-DD', lastExpected: 'YYYY-MM-DD', allDates: Set } }
  */
 function analyzeNetworkLifecycle_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -8016,6 +8017,17 @@ function analyzeNetworkLifecycle_() {
   
   const data = sheet.getDataRange().getValues();
   const networkLifecycle = {};
+  
+  // Get all networks from Networks sheet
+  const networksSheet = ss.getSheetByName("Networks");
+  if (!networksSheet) return {};
+  
+  const networkData = networksSheet.getDataRange().getValues();
+  const allPossibleNetworks = [];
+  for (let j = 1; j < networkData.length; j++) {
+    const netId = String(networkData[j][0] || '').trim();
+    if (netId) allPossibleNetworks.push(netId);
+  }
   
   // Find where data starts
   let startRow = 0;
@@ -8029,88 +8041,98 @@ function analyzeNetworkLifecycle_() {
   
   if (startRow === 0) return {};
   
-  // Scan all dates to find network appearances
+  // Scan all dates to find when each network is EXPECTED (found OR missing means expected)
   for (let i = startRow; i < data.length; i++) {
     const dateStr = String(data[i][0] || '').trim();
+    const status = String(data[i][1] || '').trim();
     const filesInDrive = Number(data[i][2]) || 0;
-    const networksFoundCount = Number(data[i][3]) || 0;
     const missingNetworks = String(data[i][4] || '').trim();
     
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
-    if (filesInDrive === 0) continue; // Skip dates with no data at all
     
-    // Get all networks from Networks sheet
-    const networksSheet = ss.getSheetByName("Networks");
-    if (!networksSheet) continue;
+    // Skip dates with no activity at all (0 files, no status)
+    if (filesInDrive === 0 && status !== '❌ MISSING' && status !== '⚠️ PARTIAL') continue;
     
-    const networkData = networksSheet.getDataRange().getValues();
-    const allNetworks = [];
-    for (let j = 1; j < networkData.length; j++) {
-      const netId = String(networkData[j][0] || '').trim();
-      if (netId) allNetworks.push(netId);
-    }
-    
-    // Determine which networks are present (not in missing list)
+    // Get missing networks list
     const missingList = missingNetworks && missingNetworks !== '—' 
-      ? missingNetworks.split(',').map(n => n.trim()) 
+      ? missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '—')
       : [];
     
-    const presentNetworks = allNetworks.filter(n => !missingList.includes(n));
+    // Get present networks (all possible minus missing)
+    const presentNetworks = allPossibleNetworks.filter(n => !missingList.includes(n));
     
-    // Update lifecycle for present networks
-    for (const netId of presentNetworks) {
+    // ANY network that appears (found OR missing) is EXPECTED on this date
+    const expectedNetworks = [...new Set([...presentNetworks, ...missingList])];
+    
+    // Update lifecycle for all expected networks
+    for (const netId of expectedNetworks) {
       if (!networkLifecycle[netId]) {
         networkLifecycle[netId] = {
-          firstSeen: dateStr,
-          lastSeen: dateStr,
-          activeDates: new Set([dateStr])
+          firstExpected: dateStr,
+          lastExpected: dateStr,
+          allDates: new Set([dateStr]),
+          foundCount: 0,
+          missingCount: 0
         };
       } else {
-        if (dateStr < networkLifecycle[netId].firstSeen) {
-          networkLifecycle[netId].firstSeen = dateStr;
+        if (dateStr < networkLifecycle[netId].firstExpected) {
+          networkLifecycle[netId].firstExpected = dateStr;
         }
-        if (dateStr > networkLifecycle[netId].lastSeen) {
-          networkLifecycle[netId].lastSeen = dateStr;
+        if (dateStr > networkLifecycle[netId].lastExpected) {
+          networkLifecycle[netId].lastExpected = dateStr;
         }
-        networkLifecycle[netId].activeDates.add(dateStr);
+        networkLifecycle[netId].allDates.add(dateStr);
+      }
+      
+      // Track if found or missing
+      if (missingList.includes(netId)) {
+        networkLifecycle[netId].missingCount++;
+      } else {
+        networkLifecycle[netId].foundCount++;
       }
     }
   }
   
   Logger.log(`Analyzed lifecycle for ${Object.keys(networkLifecycle).length} networks`);
+  
+  // Log some examples
+  for (const netId of Object.keys(networkLifecycle).slice(0, 3)) {
+    const info = networkLifecycle[netId];
+    Logger.log(`Network ${netId}: ${info.firstExpected} to ${info.lastExpected}, Found: ${info.foundCount}, Missing: ${info.missingCount}`);
+  }
+  
   return networkLifecycle;
 }
 
 /**
  * Check if a network gap should be filled based on lifecycle
- * Returns true if the gap is within the network's active period
+ * Returns { shouldFill: boolean, reason: string }
  */
-function shouldFillNetworkGap_(networkId, dateStr, lifecycle, gapThresholdDays = 7) {
+function shouldFillNetworkGap_(networkId, dateStr, lifecycle) {
   const networkInfo = lifecycle[networkId];
   
   if (!networkInfo) {
-    // Network never seen - skip
-    Logger.log(`Network ${networkId} never seen, skipping date ${dateStr}`);
-    return false;
+    // Network never seen anywhere - might be newly added, fill it
+    return { shouldFill: true, reason: 'Unknown network - attempting fill' };
   }
   
-  // Check if date is within network's active period
-  if (dateStr < networkInfo.firstSeen) {
-    Logger.log(`Date ${dateStr} is before network ${networkId} first seen (${networkInfo.firstSeen}), skipping`);
-    return false;
+  const dateObj = new Date(dateStr);
+  const firstExpectedObj = new Date(networkInfo.firstExpected);
+  const lastExpectedObj = new Date(networkInfo.lastExpected);
+  
+  // Check if date is before network started
+  if (dateObj < firstExpectedObj) {
+    return { shouldFill: false, reason: `Before first expected (${networkInfo.firstExpected})` };
   }
   
-  if (dateStr > networkInfo.lastSeen) {
-    // Check if it's been more than threshold days since last seen
-    const daysSinceLastSeen = Math.floor((new Date(dateStr) - new Date(networkInfo.lastSeen)) / 86400000);
-    if (daysSinceLastSeen > gapThresholdDays) {
-      Logger.log(`Network ${networkId} hasn't been seen for ${daysSinceLastSeen} days (last: ${networkInfo.lastSeen}), assuming removed`);
-      return false;
-    }
+  // Check if date is after network ended (7-day threshold)
+  const daysSinceLastExpected = Math.floor((dateObj - lastExpectedObj) / 86400000);
+  if (daysSinceLastExpected > 7) {
+    return { shouldFill: false, reason: `${daysSinceLastExpected} days after last expected (${networkInfo.lastExpected})` };
   }
   
-  // Date is within active period - fill the gap
-  return true;
+  // Date is within expected period - fill it
+  return { shouldFill: true, reason: 'Within active period' };
 }
 
 /**
@@ -8126,10 +8148,13 @@ function getMissingRawDataFromAudit_() {
   }
   
   // Analyze network lifecycle first
+  Logger.log("Analyzing network lifecycle...");
   const lifecycle = analyzeNetworkLifecycle_();
   
   const data = sheet.getDataRange().getValues();
   const missing = [];
+  const skipped = { beforeStart: 0, afterEnd: 0, total: 0 };
+  const byNetwork = {}; // Track gaps per network
   
   // Find where data starts (skip summary row and header row)
   let startRow = 0;
@@ -8146,10 +8171,7 @@ function getMissingRawDataFromAudit_() {
     Logger.log('No date data found in Audit Dashboard');
     return [];
   }
-  
-  let totalMissing = 0;
-  let skippedLifecycle = 0;
-  
+
   // Process data rows
   for (let i = startRow; i < data.length; i++) {
     const dateStr = String(data[i][0] || '').trim();
@@ -8178,12 +8200,22 @@ function getMissingRawDataFromAudit_() {
       }
       
       // Filter networks based on lifecycle
-      const validNetworks = networksList.filter(netId => {
-        const shouldFill = shouldFillNetworkGap_(netId, dateStr, lifecycle);
-        if (!shouldFill) skippedLifecycle++;
-        totalMissing++;
-        return shouldFill;
-      });
+      const validNetworks = [];
+      for (const netId of networksList) {
+        const check = shouldFillNetworkGap_(netId, dateStr, lifecycle);
+        
+        if (check.shouldFill) {
+          validNetworks.push(netId);
+          byNetwork[netId] = (byNetwork[netId] || 0) + 1;
+        } else {
+          skipped.total++;
+          if (check.reason.includes('Before first expected')) {
+            skipped.beforeStart++;
+          } else if (check.reason.includes('after last expected')) {
+            skipped.afterEnd++;
+          }
+        }
+      }
       
       if (validNetworks.length > 0) {
         missing.push({
@@ -8195,8 +8227,26 @@ function getMissingRawDataFromAudit_() {
     }
   }
   
+  // Log summary
+  Logger.log(`\n=== Gap Fill Analysis ===`);
   Logger.log(`Found ${missing.length} dates with valid gaps to fill`);
-  Logger.log(`Total missing: ${totalMissing}, Skipped (lifecycle): ${skippedLifecycle}`);
+  Logger.log(`Skipped (lifecycle filtering): ${skipped.total}`);
+  Logger.log(`  - Before network started: ${skipped.beforeStart}`);
+  Logger.log(`  - After network ended (7+ days): ${skipped.afterEnd}`);
+  
+  // Show top networks with gaps
+  const topNetworks = Object.entries(byNetwork)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  Logger.log(`\nTop networks with valid gaps:`);
+  for (const [netId, count] of topNetworks) {
+    const info = lifecycle[netId];
+    if (info) {
+      Logger.log(`  ${netId}: ${count} gaps (active ${info.firstExpected} to ${info.lastExpected}, Found: ${info.foundCount}, Missing: ${info.missingCount})`);
+    }
+  }
+  
   return missing;
 }
 
