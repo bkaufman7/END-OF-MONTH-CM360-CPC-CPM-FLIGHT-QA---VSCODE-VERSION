@@ -171,12 +171,24 @@ v20.x.x (or similar)
 2. Sign in to GitHub
 3. Click "Start my free trial" or "Try Copilot Free"
 4. Follow the prompts
+5. **Budget**: Free tier includes limited completions per month
+   - Once you hit the limit, suggestions pause until next month
+   - Good for trying it out or light usage
 
 **Pro Option** ($10/month - recommended for serious development):
 1. Go to [github.com/settings/copilot](https://github.com/settings/copilot)
 2. Choose "Copilot Pro" plan
-3. Add payment method
-4. Enable Copilot
+3. **⚠️ REQUIRES CREDIT CARD** - You will be charged $10/month
+4. Add payment method (credit/debit card)
+5. Enable Copilot
+6. **Budget**: Unlimited completions and chat interactions
+   - No monthly limits
+   - Priority access to latest models
+   - Faster response times
+
+**Which should you choose?**
+- **Free**: Testing it out, occasional scripts, learning
+- **Pro**: Daily development, complex projects, serious automation work
 
 #### 6B. Install Copilot Extensions in VS Code
 
@@ -292,12 +304,35 @@ Now that all tools are installed, here's how to start ANY new project:
 
 #### Option A: Start from Scratch (New Project)
 
+**IMPORTANT: Where to Create Your Project Folder**
+
+**Local Machine Storage** (Recommended):
+- ✅ **Use this if**: Working from one computer, or no VPN required
+- ✅ **Pros**: Faster, no network delays, works offline
+- ✅ **Location**: `C:\Users\YourUsername\Documents\Projects`
+
+**Network/Shared Drive** (VPN Required):
+- ⚠️ **Use this if**: Need to access from multiple locations via VPN
+- ⚠️ **Cons**: Slower, requires VPN connection every time, network dependency
+- ⚠️ **Location**: Your mapped network drive (e.g., `Z:\Projects`)
+- ⚠️ **Note**: You MUST connect to VPN before opening VS Code or running any commands
+
+**Which should you choose?**
+- **Most people**: Use local machine (C: drive)
+- **Team environments**: Use network drive only if you must access from multiple offices
+
 1. Create a project folder:
 ```powershell
-# Navigate to where you want your projects
+# LOCAL MACHINE (Recommended)
 cd C:\Users\YourUsername\Documents
+mkdir Projects
+cd Projects
+mkdir MyGoogleSheetsProject
+cd MyGoogleSheetsProject
 
-# Create a folder for your project
+# OR NETWORK DRIVE (if VPN required)
+# Make sure you're connected to VPN first!
+cd Z:\Projects  # Replace Z: with your network drive letter
 mkdir MyGoogleSheetsProject
 cd MyGoogleSheetsProject
 ```
@@ -1104,3 +1139,166 @@ Use this to verify everything is working:
 **Perfect for**: Ad Ops teams, Marketing Ops, Anyone automating Google Sheets  
 **Difficulty**: Beginner-friendly (step-by-step)  
 **Time to Complete**: 30-45 minutes
+
+---
+
+## ⚡ TLDR - "Just Tell Me What Buttons to Click"
+
+**For people who want the absolute fastest path with zero explanation:**
+
+### Quick Install Script (Copy-Paste This)
+
+1. **Open PowerShell as Administrator**
+   - Press `Windows Key`
+   - Type "PowerShell"
+   - Right-click "Windows PowerShell"
+   - Click "Run as Administrator"
+
+2. **Copy and paste this entire block** (press Enter after pasting):
+
+```powershell
+# Install Chocolatey (package manager)
+Set-ExecutionPolicy Bypass -Scope Process -Force
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Install Git, Node.js, and VS Code
+choco install git nodejs vscode -y
+
+# Refresh environment
+refreshenv
+
+# Install clasp
+npm install -g @google/clasp
+
+# Configure Git (REPLACE WITH YOUR INFO)
+git config --global user.name "Your Name"
+git config --global user.email "your.email@gmail.com"
+
+# Done!
+Write-Host "✅ Installation complete! Close this window and follow Step-by-Step below." -ForegroundColor Green
+```
+
+**⚠️ IMPORTANT**: Replace `"Your Name"` and `"your.email@gmail.com"` with your actual info!
+
+---
+
+### After Quick Install, Do These Steps:
+
+**3. Login to clasp**
+```powershell
+clasp login
+```
+- Browser opens → Sign in to Google → Click "Allow"
+
+**4. Install VS Code Extensions**
+- Open VS Code
+- Press `Ctrl+Shift+X`
+- Search "GitHub Copilot" → Click Install (both Copilot and Copilot Chat)
+- Sign in to GitHub when prompted
+
+**5. Sign up for GitHub Copilot**
+- Go to [github.com/features/copilot](https://github.com/features/copilot)
+- Choose Free (limited) or Pro ($10/month, needs credit card)
+- Follow the signup flow
+
+**6. Create a project folder**
+```powershell
+cd C:\Users\YourUsername\Documents
+mkdir Projects
+cd Projects
+mkdir MyProject
+cd MyProject
+```
+
+**7. Create new Apps Script project**
+```powershell
+clasp create --title "My Project" --type standalone
+```
+
+**8. Open in VS Code**
+```powershell
+code .
+```
+
+**9. Create your code file**
+- In VS Code: File → New File
+- Save as `Code.gs`
+- Start typing → Copilot will suggest code!
+
+**10. Push to Google**
+```powershell
+clasp push
+```
+
+**11. Open in browser to see it**
+```powershell
+clasp open
+```
+
+**Done! 🎉**
+
+---
+
+### Even Faster? Use This One-Command Setup:
+
+```powershell
+# Run this in PowerShell (as Administrator)
+Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')); choco install git nodejs vscode -y; refreshenv; npm install -g @google/clasp; Write-Host "✅ Done! Now: 1) clasp login, 2) Install Copilot in VS Code, 3) Create project folder" -ForegroundColor Green
+```
+
+**Then manually do**:
+1. `clasp login` (browser opens, click Allow)
+2. Open VS Code → Install Copilot extension → Sign in
+3. `cd` to where you want your project → `clasp create` → start coding!
+
+---
+
+### "I Don't Want to Think" Checklist:
+
+- [ ] Run the PowerShell install script above (Step 2)
+- [ ] Run `clasp login` (browser opens, click Allow)
+- [ ] Open VS Code
+- [ ] Press `Ctrl+Shift+X`, search "Copilot", install both
+- [ ] Sign in to GitHub in VS Code (Copilot prompts you)
+- [ ] Go to [github.com/settings/copilot](https://github.com/settings/copilot) and subscribe
+- [ ] Create folder: `mkdir C:\Projects\MyProject`
+- [ ] `cd C:\Projects\MyProject`
+- [ ] `clasp create --title "Test" --type standalone`
+- [ ] `code .` (opens VS Code)
+- [ ] Create `Code.gs` file and start typing
+- [ ] `clasp push` when ready
+- [ ] `clasp open` to see in browser
+
+**If anything breaks**: Go back to the detailed guide above and follow step-by-step.
+
+---
+
+### Network Drive Users (VPN Required):
+
+If you MUST use a network drive:
+
+1. **Connect to VPN FIRST** (every single time!)
+2. Create folder on network drive: `Z:\Projects\MyProject`
+3. `cd Z:\Projects\MyProject`
+4. Continue with steps above
+5. **Remember**: You need VPN connected EVERY time you:
+   - Open VS Code
+   - Run `clasp push`
+   - Run `git` commands
+   - Edit files
+
+**Recommendation**: Use local drive (`C:\`) instead unless you absolutely need network access.
+
+---
+
+**⚠️ TROUBLESHOOTING TLDR**:
+- Command not found? → Close and reopen PowerShell
+- Still not found? → Restart computer
+- clasp login fails? → Use correct Google account
+- Copilot not working? → Check [github.com/settings/copilot](https://github.com/settings/copilot) subscription active
+- Can't push? → Make sure you're in project folder (`cd` to it first)
+
+---
+
+**That's it!** For detailed explanations of what each step does, read the full guide above.
