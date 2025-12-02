@@ -8345,17 +8345,23 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
       for (const message of messages) {
         const attachments = message.getAttachments();
         
+        Logger.log(`Email has ${attachments.length} attachments`);
+        
         for (const attachment of attachments) {
           const filename = attachment.getName();
+          Logger.log(`  Checking attachment: ${filename}`);
           
-          // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}
+          // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}.zip
           // Check if filename matches our network AND date
           if (filename.startsWith(`${networkId}_`) && filename.includes(`_${filenameDateStr}_`)) {
+            Logger.log(`  ✅ MATCH! Network ${networkId}, Date ${filenameDateStr}`);
             // Save to Drive
             const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
             if (saved) {
               filesFound++;
             }
+          } else {
+            Logger.log(`  ❌ No match. Expected: ${networkId}_*_${filenameDateStr}_*`);
           }
         }
       }
