@@ -8005,7 +8005,116 @@ const RAW_GAP_FILL_TIME_BUDGET_MS = 5.5 * 60 * 1000; // 5.5 minutes
 const RAW_DATA_ROOT_FOLDER_ID = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
 
 /**
- * Get missing items from Audit Dashboard
+ * Analyze network lifecycle from Audit Dashboard
+ * Returns map of { networkId: { firstSeen: 'YYYY-MM-DD', lastSeen: 'YYYY-MM-DD', activeDates: Set } }
+ */
+function analyzeNetworkLifecycle_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet) return {};
+  
+  const data = sheet.getDataRange().getValues();
+  const networkLifecycle = {};
+  
+  // Find where data starts
+  let startRow = 0;
+  for (let i = 0; i < data.length; i++) {
+    const cellValue = String(data[i][0] || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cellValue)) {
+      startRow = i;
+      break;
+    }
+  }
+  
+  if (startRow === 0) return {};
+  
+  // Scan all dates to find network appearances
+  for (let i = startRow; i < data.length; i++) {
+    const dateStr = String(data[i][0] || '').trim();
+    const filesInDrive = Number(data[i][2]) || 0;
+    const networksFoundCount = Number(data[i][3]) || 0;
+    const missingNetworks = String(data[i][4] || '').trim();
+    
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+    if (filesInDrive === 0) continue; // Skip dates with no data at all
+    
+    // Get all networks from Networks sheet
+    const networksSheet = ss.getSheetByName("Networks");
+    if (!networksSheet) continue;
+    
+    const networkData = networksSheet.getDataRange().getValues();
+    const allNetworks = [];
+    for (let j = 1; j < networkData.length; j++) {
+      const netId = String(networkData[j][0] || '').trim();
+      if (netId) allNetworks.push(netId);
+    }
+    
+    // Determine which networks are present (not in missing list)
+    const missingList = missingNetworks && missingNetworks !== '—' 
+      ? missingNetworks.split(',').map(n => n.trim()) 
+      : [];
+    
+    const presentNetworks = allNetworks.filter(n => !missingList.includes(n));
+    
+    // Update lifecycle for present networks
+    for (const netId of presentNetworks) {
+      if (!networkLifecycle[netId]) {
+        networkLifecycle[netId] = {
+          firstSeen: dateStr,
+          lastSeen: dateStr,
+          activeDates: new Set([dateStr])
+        };
+      } else {
+        if (dateStr < networkLifecycle[netId].firstSeen) {
+          networkLifecycle[netId].firstSeen = dateStr;
+        }
+        if (dateStr > networkLifecycle[netId].lastSeen) {
+          networkLifecycle[netId].lastSeen = dateStr;
+        }
+        networkLifecycle[netId].activeDates.add(dateStr);
+      }
+    }
+  }
+  
+  Logger.log(`Analyzed lifecycle for ${Object.keys(networkLifecycle).length} networks`);
+  return networkLifecycle;
+}
+
+/**
+ * Check if a network gap should be filled based on lifecycle
+ * Returns true if the gap is within the network's active period
+ */
+function shouldFillNetworkGap_(networkId, dateStr, lifecycle, gapThresholdDays = 7) {
+  const networkInfo = lifecycle[networkId];
+  
+  if (!networkInfo) {
+    // Network never seen - skip
+    Logger.log(`Network ${networkId} never seen, skipping date ${dateStr}`);
+    return false;
+  }
+  
+  // Check if date is within network's active period
+  if (dateStr < networkInfo.firstSeen) {
+    Logger.log(`Date ${dateStr} is before network ${networkId} first seen (${networkInfo.firstSeen}), skipping`);
+    return false;
+  }
+  
+  if (dateStr > networkInfo.lastSeen) {
+    // Check if it's been more than threshold days since last seen
+    const daysSinceLastSeen = Math.floor((new Date(dateStr) - new Date(networkInfo.lastSeen)) / 86400000);
+    if (daysSinceLastSeen > gapThresholdDays) {
+      Logger.log(`Network ${networkId} hasn't been seen for ${daysSinceLastSeen} days (last: ${networkInfo.lastSeen}), assuming removed`);
+      return false;
+    }
+  }
+  
+  // Date is within active period - fill the gap
+  return true;
+}
+
+/**
+ * Get missing items from Audit Dashboard with smart lifecycle filtering
  * Returns array of { date, networks: [] }
  */
 function getMissingRawDataFromAudit_() {
@@ -8015,6 +8124,9 @@ function getMissingRawDataFromAudit_() {
   if (!sheet) {
     throw new Error("Audit Dashboard sheet not found. Run the audit first.");
   }
+  
+  // Analyze network lifecycle first
+  const lifecycle = analyzeNetworkLifecycle_();
   
   const data = sheet.getDataRange().getValues();
   const missing = [];
@@ -8034,6 +8146,9 @@ function getMissingRawDataFromAudit_() {
     Logger.log('No date data found in Audit Dashboard');
     return [];
   }
+  
+  let totalMissing = 0;
+  let skippedLifecycle = 0;
   
   // Process data rows
   for (let i = startRow; i < data.length; i++) {
@@ -8062,17 +8177,26 @@ function getMissingRawDataFromAudit_() {
         networksList = missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '—');
       }
       
-      if (networksList.length > 0) {
+      // Filter networks based on lifecycle
+      const validNetworks = networksList.filter(netId => {
+        const shouldFill = shouldFillNetworkGap_(netId, dateStr, lifecycle);
+        if (!shouldFill) skippedLifecycle++;
+        totalMissing++;
+        return shouldFill;
+      });
+      
+      if (validNetworks.length > 0) {
         missing.push({
           date: dateStr,
-          networks: networksList,
+          networks: validNetworks,
           status: status
         });
       }
     }
   }
   
-  Logger.log(`Found ${missing.length} dates with missing/partial data`);
+  Logger.log(`Found ${missing.length} dates with valid gaps to fill`);
+  Logger.log(`Total missing: ${totalMissing}, Skipped (lifecycle): ${skippedLifecycle}`);
   return missing;
 }
 
@@ -8258,11 +8382,17 @@ function startRawDataGapFill() {
     }
   }
   
-  // Get missing items from audit
+  // Get missing items from audit (with smart lifecycle filtering)
+  ui.alert(
+    '🔍 Analyzing Data',
+    'Analyzing network lifecycles and finding valid gaps...\n\nThis may take a moment.',
+    ui.ButtonSet.OK
+  );
+  
   const missing = getMissingRawDataFromAudit_();
   
   if (missing.length === 0) {
-    ui.alert('✅ No Gaps Found', 'All raw data is complete!', ui.ButtonSet.OK);
+    ui.alert('✅ No Gaps Found', 'All raw data is complete or all gaps are outside network active periods!', ui.ButtonSet.OK);
     return;
   }
   
@@ -8291,11 +8421,24 @@ function startRawDataGapFill() {
   
   saveRawGapFillState_(state);
   
+  // Ask if user wants auto-resume trigger
+  const triggerResponse = ui.alert(
+    '🚀 Raw Data Gap Fill Ready',
+    `Found ${queue.length} valid date/network combinations to process.\n\n` +
+    `This will take multiple runs due to Gmail quota and time limits.\n\n` +
+    `Do you want to create an AUTO-RESUME TRIGGER?\n` +
+    `(Recommended - will continue automatically every 10 minutes until complete)`,
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (triggerResponse === ui.Button.YES) {
+    createRawGapFillAutoResumeTrigger();
+  }
+  
   ui.alert(
-    '🚀 Raw Data Gap Fill Started',
-    `Found ${queue.length} missing date/network combinations.\n\n` +
+    '▶️ Starting Now',
     `Processing will begin now and update the Audit Dashboard Notes column.\n\n` +
-    `Create an auto-resume trigger to run automatically every 10 minutes.`,
+    `You can check progress with "View Status" or watch the Notes column.`,
     ui.ButtonSet.OK
   );
   
@@ -8304,7 +8447,7 @@ function startRawDataGapFill() {
 }
 
 /**
- * Process a chunk of raw data gap fill
+ * Process a chunk of raw data gap fill (called by trigger or manually)
  */
 function processRawDataGapFillChunk_() {
   const startTime = Date.now();
@@ -8321,6 +8464,7 @@ function processRawDataGapFillChunk_() {
   }
   
   const queue = state.queue;
+  let processedThisRun = 0;
   
   while (state.currentIndex < queue.length) {
     // Check time budget
@@ -8328,15 +8472,24 @@ function processRawDataGapFillChunk_() {
       Logger.log(`⏸️ Time budget reached. Processed ${state.processed}/${queue.length}`);
       saveRawGapFillState_(state);
       
-      SpreadsheetApp.getUi().alert(
-        '⏸️ Gap Fill Paused',
-        `Time limit reached. Progress saved.\n\n` +
-        `Processed: ${state.processed}/${queue.length}\n` +
-        `Successful: ${state.successful}\n` +
-        `Failed: ${state.failed}\n\n` +
-        `Run again to continue.`,
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
+      // Don't show alert if trigger is active (silent resume)
+      const props = PropertiesService.getScriptProperties();
+      const triggerId = props.getProperty(RAW_GAP_FILL_TRIGGER_KEY);
+      
+      if (!triggerId) {
+        // Manual run - show alert
+        SpreadsheetApp.getUi().alert(
+          '⏸️ Gap Fill Paused',
+          `Time limit reached. Progress saved.\n\n` +
+          `Processed: ${state.processed}/${queue.length}\n` +
+          `Successful: ${state.successful}\n` +
+          `Failed: ${state.failed}\n\n` +
+          `Run again to continue, or create auto-resume trigger.`,
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+      } else {
+        Logger.log(`Auto-resume trigger active - will continue in 10 minutes`);
+      }
       return;
     }
     
@@ -8344,7 +8497,7 @@ function processRawDataGapFillChunk_() {
     const dateStr = item.date;
     const networkId = item.network;
     
-    Logger.log(`Processing: ${dateStr} / ${networkId}`);
+    Logger.log(`Processing [${state.currentIndex + 1}/${queue.length}]: ${dateStr} / ${networkId}`);
     updateRawDataAuditNotes_(dateStr, `⏳ Processing network ${networkId}...`);
     
     // Try to download from Gmail
@@ -8358,14 +8511,15 @@ function processRawDataGapFillChunk_() {
     } else {
       item.status = 'failed';
       state.failed++;
-      updateRawDataAuditNotes_(dateStr, `❌ Failed: ${result.errorMsg}`);
+      updateRawDataAuditNotes_(dateStr, `❌ Failed ${networkId}: ${result.errorMsg}`);
       Logger.log(`❌ Failed: ${dateStr} / ${networkId} - ${result.errorMsg}`);
     }
     
     state.processed++;
     state.currentIndex++;
+    processedThisRun++;
     
-    // Save state periodically
+    // Save state every 5 items
     if (state.processed % 5 === 0) {
       saveRawGapFillState_(state);
     }
@@ -8376,20 +8530,24 @@ function processRawDataGapFillChunk_() {
   state.endTime = new Date().toISOString();
   saveRawGapFillState_(state);
   
-  const elapsed = (Date.now() - startTime) / 1000;
+  const totalTime = (Date.now() - new Date(state.startTime).getTime()) / 1000;
+  const thisRunTime = (Date.now() - startTime) / 1000;
+  
+  // Auto-delete trigger
+  deleteRawGapFillAutoResumeTrigger_();
+  
+  Logger.log(`✅ Raw Data Gap Fill Complete! Total: ${state.processed} items, Time: ${totalTime.toFixed(1)}s`);
   
   SpreadsheetApp.getUi().alert(
     '✅ Raw Data Gap Fill Complete',
-    `Finished processing ${state.processed} items in ${elapsed.toFixed(1)}s.\n\n` +
+    `Finished processing ${state.processed} items.\n\n` +
     `Successful: ${state.successful}\n` +
     `Failed: ${state.failed}\n\n` +
+    `Total time: ${(totalTime / 60).toFixed(1)} minutes\n\n` +
     `Check the Audit Dashboard Notes column for details.\n` +
     `Re-run the Raw Data Audit to update statuses.`,
     SpreadsheetApp.getUi().ButtonSet.OK
   );
-  
-  // Auto-delete trigger if exists
-  deleteRawGapFillAutoResumeTrigger_();
 }
 
 /**
