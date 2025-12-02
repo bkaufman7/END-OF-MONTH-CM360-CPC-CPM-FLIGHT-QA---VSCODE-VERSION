@@ -8029,31 +8029,31 @@ function analyzeNetworkLifecycle_() {
     if (netId) allPossibleNetworks.push(netId);
   }
   
-  // Find where data starts
+  // Find where data starts (dates are stored as Date objects)
   let startRow = 0;
   for (let i = 0; i < data.length; i++) {
-    const cellValue = String(data[i][0] || '').trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(cellValue)) {
+    const cellValue = data[i][0];
+    if (cellValue instanceof Date && !isNaN(cellValue)) {
       startRow = i;
-      Logger.log(`Found data starting at row ${i}: ${cellValue}`);
+      Logger.log(`Found data starting at row ${i}`);
       break;
     }
   }
   
   if (startRow === 0) {
     Logger.log(`Could not find date data. Total rows: ${data.length}`);
-    Logger.log(`First 5 rows, column A: ${data.slice(0, 5).map(r => r[0]).join(', ')}`);
     return {};
   }
   
   // Scan all dates to find when each network is EXPECTED (found OR missing means expected)
   for (let i = startRow; i < data.length; i++) {
-    const dateStr = String(data[i][0] || '').trim();
+    const dateObj = data[i][0];
+    if (!(dateObj instanceof Date) || isNaN(dateObj)) continue;
+    
+    const dateStr = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy-MM-dd');
     const status = String(data[i][1] || '').trim();
     const filesInDrive = Number(data[i][2]) || 0;
     const missingNetworks = String(data[i][4] || '').trim();
-    
-    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
     
     // Skip dates with no activity at all (0 files, no status)
     if (filesInDrive === 0 && status !== '❌ MISSING' && status !== '⚠️ PARTIAL') continue;
@@ -8161,31 +8161,30 @@ function getMissingRawDataFromAudit_() {
   const skipped = { beforeStart: 0, afterEnd: 0, total: 0 };
   const byNetwork = {}; // Track gaps per network
   
-  // Find where data starts (skip summary row and header row)
+  // Find where data starts (dates are stored as Date objects)
   let startRow = 0;
   for (let i = 0; i < data.length; i++) {
-    const cellValue = String(data[i][0] || '').trim();
-    // Look for YYYY-MM-DD format (first data row)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(cellValue)) {
+    const cellValue = data[i][0];
+    if (cellValue instanceof Date && !isNaN(cellValue)) {
       startRow = i;
-      Logger.log(`Found data starting at row ${i}: ${cellValue}`);
+      Logger.log(`Found data starting at row ${i}`);
       break;
     }
   }
   
   if (startRow === 0) {
     Logger.log(`Could not find date data in getMissingRawDataFromAudit_. Total rows: ${data.length}`);
-    Logger.log(`First 10 rows, column A: ${data.slice(0, 10).map(r => String(r[0] || '').trim()).join(', ')}`);
     return [];
   }
 
   // Process data rows
   for (let i = startRow; i < data.length; i++) {
-    const dateStr = String(data[i][0] || '').trim();
+    const dateObj = data[i][0];
+    if (!(dateObj instanceof Date) || isNaN(dateObj)) continue;
+    
+    const dateStr = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy-MM-dd');
     const status = String(data[i][1] || '').trim();
     const missingNetworks = String(data[i][4] || '').trim();
-    
-    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
     
     // Only process MISSING or PARTIAL statuses
     if (status === '❌ MISSING' || status === '⚠️ PARTIAL') {
