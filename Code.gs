@@ -20,7 +20,9 @@ function onOpen() {
     // === ARCHIVE AUDITS ===
     .addSubMenu(ui.createMenu("📋 Archive Audits")
       .addItem("📊 Raw Data Audit (Drive)", "setupAndRefreshRawDataAudit")
-      .addItem("📧 Violations Audit (Drive)", "setupAndRefreshViolationsAudit"))
+      .addItem("📧 Violations Audit (Drive)", "setupAndRefreshViolationsAudit")
+      .addSeparator()
+      .addItem("🔄 Reset Raw Data Audit", "resetRawDataAudit"))
     .addSeparator()
     
     // === TIME MACHINE ===
@@ -6628,7 +6630,6 @@ function refreshAuditDashboardChunked() {
   }
   
   const allNetworks = new Set(state.allNetworks);
-  const dateData = state.dateData;
   
   // Scan Drive with chunking
   const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
@@ -6650,10 +6651,11 @@ function refreshAuditDashboardChunked() {
       
       // Skip if already processed
       if (state.monthsProcessed.includes(monthName)) {
+        Logger.log(`Skipping already processed month: ${monthName}`);
         continue;
       }
       
-      // Check time budget
+      // Check time budget BEFORE processing month
       if ((Date.now() - startTime) >= RAW_DATA_AUDIT_TIME_BUDGET_MS) {
         Logger.log(`⏸️ Time budget reached. Saving progress. Processed ${state.monthsProcessed.length}/${monthFoldersList.length} months.`);
         saveRawDataAuditState_(state);
@@ -6677,8 +6679,8 @@ function refreshAuditDashboardChunked() {
         
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
         
-        if (!dateData[dateStr]) {
-          dateData[dateStr] = { files: 0, networks: [] };
+        if (!state.dateData[dateStr]) {
+          state.dateData[dateStr] = { files: 0, networks: [] };
         }
         
         const files = dateFolder.getFiles();
@@ -6688,21 +6690,23 @@ function refreshAuditDashboardChunked() {
           
           const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
           if (networkId) {
-            dateData[dateStr].files++;
-            if (!dateData[dateStr].networks.includes(networkId)) {
-              dateData[dateStr].networks.push(networkId);
+            state.dateData[dateStr].files++;
+            if (!state.dateData[dateStr].networks.includes(networkId)) {
+              state.dateData[dateStr].networks.push(networkId);
             }
           }
         }
       }
       
+      // Mark month as processed and save state immediately
       state.monthsProcessed.push(monthName);
-      state.dateData = dateData;
+      saveRawDataAuditState_(state);
+      Logger.log(`✅ Completed and saved month: ${monthName} (${state.monthsProcessed.length}/${monthFoldersList.length})`);
     }
   }
   
   // All months processed - generate final report
-  generateRawDataAuditReport_(sheet, dateData, allNetworks);
+  generateRawDataAuditReport_(sheet, state.dateData, allNetworks);
   clearRawDataAuditState_();
   
   const elapsed = (Date.now() - startTime) / 1000;
@@ -7883,6 +7887,23 @@ function resetGapFill() {
     }
     
     ui.alert('✅ Reset Complete', 'Gap fill has been reset.', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Reset Raw Data Audit state and start fresh
+ */
+function resetRawDataAudit() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    '⚠️ Reset Raw Data Audit',
+    'This will clear the audit progress and start scanning from the beginning.\n\nAre you sure?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    clearRawDataAuditState_();
+    ui.alert('✅ Reset Complete', 'Raw Data Audit state has been cleared. Run the audit again to start fresh.', ui.ButtonSet.OK);
   }
 }
 
