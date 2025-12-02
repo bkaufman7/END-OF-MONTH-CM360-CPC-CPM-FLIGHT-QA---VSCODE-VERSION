@@ -72,6 +72,18 @@ function onOpen() {
       .addItem("🕒 Create Daily Email Trigger (9am)", "createDailyEmailTrigger")
       .addSeparator()
       .addItem("🧹 Clear Violations", "clearViolations"))
+    .addSeparator()
+    
+    // === GAP FILL AUTOMATION ===
+    .addSubMenu(ui.createMenu("🔧 Gap Fill Automation")
+      .addItem("🎯 Setup Gap Fill Progress Sheet", "setupGapFillProgressSheet")
+      .addItem("🔄 Start Auto Gap Fill", "startAutoGapFill")
+      .addItem("📊 View Gap Fill Status", "viewGapFillStatus")
+      .addSeparator()
+      .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createGapFillAutoResumeTrigger")
+      .addItem("🛑 Stop Gap Fill & Delete Trigger", "stopGapFillAndDeleteTrigger")
+      .addSeparator()
+      .addItem("🔄 Reset Gap Fill (Start Over)", "resetGapFill"))
     .addToUi();
   
   // Setup Time Machine sheet if it exists
@@ -7055,6 +7067,598 @@ function crawlFolder_(folder, depth) {
 
 // =====================================================================================================================
 // ======================================== END DRIVE FOLDER CRAWLER ==================================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ========================================= AUTO GAP FILL SYSTEM =====================================================
+// =====================================================================================================================
+
+// Constants
+const GAP_FILL_STATE_KEY = 'gap_fill_state';
+const GAP_FILL_TRIGGER_KEY = 'gap_fill_trigger_id';
+const GAP_FILL_TIME_BUDGET_MS = 5.5 * 60 * 1000; // 5.5 minutes safety margin
+const VIOLATIONS_ROOT_FOLDER_ID = '1lJm0K1LLo9ez29AcKCc4qtIbBC2uK3a9';
+
+/**
+ * Setup Gap Fill Progress Sheet
+ */
+function setupGapFillProgressSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Gap Fill Progress");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("Gap Fill Progress");
+  }
+  
+  sheet.clear();
+  
+  // Column widths
+  sheet.setColumnWidth(1, 120);  // Date
+  sheet.setColumnWidth(2, 150);  // Status
+  sheet.setColumnWidth(3, 180);  // Last Updated
+  sheet.setColumnWidth(4, 80);   // Attempts
+  sheet.setColumnWidth(5, 300);  // Error Message
+  sheet.setColumnWidth(6, 150);  // Drive File
+  
+  // Headers
+  const headers = [["Date", "Status", "Last Updated", "Attempts", "Error Message", "Drive File"]];
+  sheet.getRange(1, 1, 1, 6).setValues(headers)
+    .setFontWeight("bold")
+    .setBackground("#34a853")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center");
+  
+  sheet.setFrozenRows(1);
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Gap Fill Progress Sheet Ready',
+    'Progress tracking sheet created!\n\n' +
+    'Run "Start Auto Gap Fill" to begin processing missing violations reports.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Get missing dates from Violations Audit sheet
+ */
+function getMissingDatesFromAudit_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const auditSheet = ss.getSheetByName("Violations Audit");
+  
+  if (!auditSheet || auditSheet.getLastRow() < 2) {
+    return [];
+  }
+  
+  const data = auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, 2).getValues();
+  const missingDates = [];
+  
+  for (const row of data) {
+    const dateStr = row[0];
+    const status = row[1];
+    
+    if (status === '❌ MISSING' && dateStr) {
+      missingDates.push(String(dateStr));
+    }
+  }
+  
+  return missingDates;
+}
+
+/**
+ * Initialize Gap Fill Progress sheet with missing dates
+ */
+function initializeGapFillProgress_(missingDates) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Gap Fill Progress");
+  
+  if (!sheet) {
+    setupGapFillProgressSheet();
+    sheet = ss.getSheetByName("Gap Fill Progress");
+  }
+  
+  // Clear existing data
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).clear();
+  }
+  
+  // Add all missing dates as "Queued"
+  const rows = missingDates.map(date => [
+    date,
+    '⏳ Queued',
+    new Date().toLocaleString(),
+    0,
+    '',
+    ''
+  ]);
+  
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+  }
+  
+  return rows.length;
+}
+
+/**
+ * Update progress for a specific date
+ */
+function updateGapFillProgress_(dateStr, status, errorMsg, driveFile) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Gap Fill Progress");
+  
+  if (!sheet) return;
+  
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === dateStr) {
+      const attempts = Number(data[i][3] || 0) + 1;
+      sheet.getRange(i + 1, 2).setValue(status);
+      sheet.getRange(i + 1, 3).setValue(new Date().toLocaleString());
+      sheet.getRange(i + 1, 4).setValue(attempts);
+      sheet.getRange(i + 1, 5).setValue(errorMsg || '');
+      sheet.getRange(i + 1, 6).setValue(driveFile || '');
+      
+      // Color code status
+      const statusCell = sheet.getRange(i + 1, 2);
+      if (status.includes('✅')) {
+        statusCell.setBackground('#d4edda').setFontColor('#155724');
+      } else if (status.includes('❌')) {
+        statusCell.setBackground('#f8d7da').setFontColor('#721c24');
+      } else if (status.includes('🔄')) {
+        statusCell.setBackground('#cfe2ff').setFontColor('#084298');
+      } else if (status.includes('⏳')) {
+        statusCell.setBackground('#fff3cd').setFontColor('#856404');
+      }
+      
+      break;
+    }
+  }
+}
+
+/**
+ * Get gap fill state from DocumentProperties
+ */
+function getGapFillState_() {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    const stateJson = props.getProperty(GAP_FILL_STATE_KEY);
+    return stateJson ? JSON.parse(stateJson) : null;
+  } catch (e) {
+    Logger.log('Error loading gap fill state: ' + e);
+    return null;
+  }
+}
+
+/**
+ * Save gap fill state to DocumentProperties
+ */
+function saveGapFillState_(state) {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    props.setProperty(GAP_FILL_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    Logger.log('Error saving gap fill state: ' + e);
+  }
+}
+
+/**
+ * Clear gap fill state
+ */
+function clearGapFillState_() {
+  const props = PropertiesService.getDocumentProperties();
+  props.deleteProperty(GAP_FILL_STATE_KEY);
+}
+
+/**
+ * Format date to MM.DD.YY format for email attachment search
+ */
+function formatDateForEmail_(dateStr) {
+  // dateStr is "2025-04-23"
+  const parts = dateStr.split('-');
+  const month = parts[1];
+  const day = parts[2];
+  const year = parts[0].slice(2); // "25"
+  return `${month}.${day}.${year}`;
+}
+
+/**
+ * Format date to month folder name "MM-MonthName"
+ */
+function getMonthFolderName_(dateStr) {
+  const parts = dateStr.split('-');
+  const monthNum = parseInt(parts[1]);
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  return `${parts[1]}-${monthNames[monthNum - 1]}`;
+}
+
+/**
+ * Search Gmail for violations email attachment
+ * Returns {found: boolean, attachment: Blob, filename: string}
+ */
+function searchGmailForViolationsAttachment_(dateStr) {
+  const emailDateFormat = formatDateForEmail_(dateStr); // "04.23.25"
+  
+  // Search for violations email on that date
+  const query = `subject:"CM360 CPC/CPM FLIGHT QA" after:${dateStr} before:${getNextDate_(dateStr)} has:attachment`;
+  const threads = GmailApp.search(query, 0, 5);
+  
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    for (const msg of messages) {
+      const attachments = msg.getAttachments();
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        
+        // Check if filename contains the date in either format
+        if (filename.includes(emailDateFormat) || filename.includes(dateStr)) {
+          return {
+            found: true,
+            attachment: attachment,
+            filename: filename
+          };
+        }
+      }
+    }
+  }
+  
+  return { found: false, attachment: null, filename: null };
+}
+
+/**
+ * Save violations attachment to Drive with uniform naming
+ */
+function saveViolationsAttachmentToDrive_(dateStr, attachment, originalFilename) {
+  const rootFolder = DriveApp.getFolderById(VIOLATIONS_ROOT_FOLDER_ID);
+  
+  // Get year folder (2025)
+  const yearFolders = rootFolder.getFoldersByName('2025');
+  let yearFolder;
+  if (yearFolders.hasNext()) {
+    yearFolder = yearFolders.next();
+  } else {
+    yearFolder = rootFolder.createFolder('2025');
+  }
+  
+  // Get month folder
+  const monthFolderName = getMonthFolderName_(dateStr);
+  const monthFolders = yearFolder.getFoldersByName(monthFolderName);
+  let monthFolder;
+  if (monthFolders.hasNext()) {
+    monthFolder = monthFolders.next();
+  } else {
+    monthFolder = yearFolder.createFolder(monthFolderName);
+  }
+  
+  // Uniform filename
+  const uniformFilename = `CM360_Report_${dateStr}.xlsx`;
+  
+  // Check if file already exists and delete it
+  const existingFiles = monthFolder.getFilesByName(uniformFilename);
+  while (existingFiles.hasNext()) {
+    existingFiles.next().setTrashed(true);
+  }
+  
+  // Save attachment
+  const file = monthFolder.createFile(attachment);
+  file.setName(uniformFilename);
+  
+  return {
+    success: true,
+    filename: uniformFilename,
+    url: file.getUrl(),
+    folderPath: `Historical Violation Reports/2025/${monthFolderName}/`
+  };
+}
+
+/**
+ * Get next date as string
+ */
+function getNextDate_(dateStr) {
+  const date = new Date(dateStr);
+  date.setDate(date.getDate() + 1);
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+/**
+ * Start Auto Gap Fill process
+ */
+function startAutoGapFill() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // First, run Violations Audit to get latest missing dates
+  ui.alert('🔄 Running Violations Audit', 'Scanning Drive for missing violations reports...', ui.ButtonSet.OK);
+  setupAndRefreshViolationsAudit();
+  
+  // Get missing dates
+  const missingDates = getMissingDatesFromAudit_();
+  
+  if (missingDates.length === 0) {
+    ui.alert(
+      '✅ No Gaps Found',
+      'All violations reports are present in Drive!\n\nNo gap-fill needed.',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+  
+  // Initialize progress sheet
+  const count = initializeGapFillProgress_(missingDates);
+  
+  // Initialize state
+  const state = {
+    queue: missingDates,
+    currentDate: null,
+    currentStep: null,
+    startTime: new Date().toISOString(),
+    processed: 0,
+    successful: 0,
+    failed: 0
+  };
+  saveGapFillState_(state);
+  
+  ui.alert(
+    '🚀 Gap Fill Started',
+    `Found ${count} missing violations reports.\n\n` +
+    `Auto gap-fill will process them automatically.\n\n` +
+    `Create an auto-resume trigger (10 min) from the menu to enable continuous processing.`,
+    ui.ButtonSet.OK
+  );
+  
+  // Start first chunk
+  processGapFillChunk_();
+}
+
+/**
+ * Process one chunk of gap fill (respects time budget)
+ */
+function processGapFillChunk_() {
+  const startTime = Date.now();
+  const state = getGapFillState_();
+  
+  if (!state || !state.queue || state.queue.length === 0) {
+    Logger.log('✅ Gap fill complete or no state found');
+    return;
+  }
+  
+  // Process dates from queue
+  while (state.queue.length > 0 && (Date.now() - startTime) < GAP_FILL_TIME_BUDGET_MS) {
+    const dateStr = state.queue[0];
+    state.currentDate = dateStr;
+    
+    Logger.log(`🔄 Processing date: ${dateStr}`);
+    updateGapFillProgress_(dateStr, '🔄 Checking Email...', '', '');
+    
+    try {
+      // Step 1: Check Gmail for existing violations email
+      const emailResult = searchGmailForViolationsAttachment_(dateStr);
+      
+      if (emailResult.found) {
+        Logger.log(`✅ Found email attachment for ${dateStr}`);
+        updateGapFillProgress_(dateStr, '🔄 Saving to Drive...', '', '');
+        
+        // Save to Drive
+        const saveResult = saveViolationsAttachmentToDrive_(dateStr, emailResult.attachment, emailResult.filename);
+        
+        updateGapFillProgress_(dateStr, '✅ Complete (from email)', '', saveResult.filename);
+        state.successful++;
+        state.processed++;
+        state.queue.shift(); // Remove from queue
+        saveGapFillState_(state);
+        continue;
+      }
+      
+      // Step 2: Email not found, need to run Time Machine
+      Logger.log(`⚠️ No email found for ${dateStr}, running Time Machine`);
+      updateGapFillProgress_(dateStr, '🔄 Running Time Machine...', '', '');
+      
+      const tmResult = runTimeMachineForDate_(dateStr);
+      
+      if (tmResult.success) {
+        updateGapFillProgress_(dateStr, '✅ Complete (regenerated)', '', tmResult.filename);
+        state.successful++;
+      } else {
+        updateGapFillProgress_(dateStr, '❌ Failed', tmResult.error, '');
+        state.failed++;
+      }
+      
+      state.processed++;
+      state.queue.shift();
+      saveGapFillState_(state);
+      
+    } catch (e) {
+      Logger.log(`❌ Error processing ${dateStr}: ${e}`);
+      updateGapFillProgress_(dateStr, '❌ Failed', String(e), '');
+      state.failed++;
+      state.processed++;
+      state.queue.shift();
+      saveGapFillState_(state);
+    }
+  }
+  
+  // Save final state
+  saveGapFillState_(state);
+  
+  if (state.queue.length === 0) {
+    Logger.log(`✅ Gap fill complete! Processed: ${state.processed}, Successful: ${state.successful}, Failed: ${state.failed}`);
+    clearGapFillState_();
+  } else {
+    Logger.log(`⏸️ Gap fill paused. Remaining: ${state.queue.length}/${state.processed + state.queue.length}`);
+  }
+}
+
+/**
+ * Run Time Machine for a specific date (internal version)
+ * Returns {success, filename, error}
+ */
+function runTimeMachineForDate_(dateStr) {
+  try {
+    // Clear sheets
+    clearRawData();
+    clearViolations();
+    
+    // Step 1: Download raw data
+    const downloadResult = downloadRawDataForDate_(dateStr);
+    if (!downloadResult.success) {
+      return { success: false, error: downloadResult.error };
+    }
+    
+    // Step 2: Run QA
+    runQAOnly();
+    
+    // Step 3: Save violations report
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const violationsSheet = ss.getSheetByName("Violations");
+    const violationCount = violationsSheet ? Math.max(0, violationsSheet.getLastRow() - 1) : 0;
+    
+    const saveResult = saveViolationsReportToDrive_(dateStr, violationCount);
+    
+    if (!saveResult.success) {
+      return { success: false, error: saveResult.error };
+    }
+    
+    // Step 4: Send email summary
+    sendEmailSummary();
+    
+    return {
+      success: true,
+      filename: saveResult.filename,
+      fileUrl: saveResult.fileUrl
+    };
+    
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * View Gap Fill Status
+ */
+function viewGapFillStatus() {
+  const state = getGapFillState_();
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!state) {
+    ui.alert(
+      '📊 Gap Fill Status',
+      'No gap fill process is currently running.\n\n' +
+      'Run "Start Auto Gap Fill" to begin.',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+  
+  const remaining = state.queue ? state.queue.length : 0;
+  const total = state.processed + remaining;
+  
+  ui.alert(
+    '📊 Gap Fill Status',
+    `Started: ${new Date(state.startTime).toLocaleString()}\n\n` +
+    `Total Dates: ${total}\n` +
+    `Processed: ${state.processed}\n` +
+    `Successful: ${state.successful}\n` +
+    `Failed: ${state.failed}\n` +
+    `Remaining: ${remaining}\n\n` +
+    `Current: ${state.currentDate || 'None'}\n` +
+    `Step: ${state.currentStep || 'N/A'}\n\n` +
+    `Check "Gap Fill Progress" sheet for details.`,
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Reset Gap Fill
+ */
+function resetGapFill() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    '⚠️ Reset Gap Fill',
+    'This will clear all progress and start over.\n\nAre you sure?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    clearGapFillState_();
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("Gap Fill Progress");
+    if (sheet) {
+      ss.deleteSheet(sheet);
+    }
+    
+    ui.alert('✅ Reset Complete', 'Gap fill has been reset.', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Create Auto-Resume Trigger for Gap Fill
+ */
+function createGapFillAutoResumeTrigger() {
+  // Delete existing trigger
+  deleteGapFillAutoResumeTrigger_();
+  
+  // Create new 10-minute recurring trigger
+  const trigger = ScriptApp.newTrigger('processGapFillChunk_')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+  
+  // Save trigger ID
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(GAP_FILL_TRIGGER_KEY, trigger.getUniqueId());
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Auto-Resume Trigger Created',
+    'Gap fill will automatically resume every 10 minutes.\n\n' +
+    'The trigger will process missing violations reports continuously until all gaps are filled.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Delete Gap Fill Auto-Resume Trigger
+ */
+function deleteGapFillAutoResumeTrigger_() {
+  const props = PropertiesService.getScriptProperties();
+  const triggerId = props.getProperty(GAP_FILL_TRIGGER_KEY);
+  
+  if (triggerId) {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getUniqueId() === triggerId) {
+        ScriptApp.deleteTrigger(trigger);
+        break;
+      }
+    }
+    props.deleteProperty(GAP_FILL_TRIGGER_KEY);
+  }
+}
+
+/**
+ * Stop Gap Fill and Delete Trigger
+ */
+function stopGapFillAndDeleteTrigger() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    '🛑 Stop Gap Fill',
+    'This will stop the auto gap-fill process and delete the trigger.\n\n' +
+    'Progress will be saved and you can resume later.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    deleteGapFillAutoResumeTrigger_();
+    ui.alert(
+      '✅ Stopped',
+      'Gap fill process stopped and trigger deleted.\n\n' +
+      'Progress has been saved. Run "Start Auto Gap Fill" to resume.',
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+// =====================================================================================================================
+// ======================================= END AUTO GAP FILL SYSTEM ===================================================
 // =====================================================================================================================
 
 
