@@ -8312,29 +8312,27 @@ function clearRawGapFillState_() {
  */
 function downloadRawDataForDateNetwork_(dateStr, networkId) {
   try {
-    // The report date in Audit Dashboard is when the email was sent (e.g., May 11)
-    // BUT the filename contains the DATA date which is the previous day (e.g., May 10)
-    // So for dateStr = "2025-05-11", we need to look for files with "20250510" in the name
+    // Convert date to YYYYMMDD format for filename matching
+    const filenameDateStr = dateStr.replace(/-/g, ''); // 2025-05-11 -> 20250511
     
+    // Search Gmail for raw data emails on specific date
     const targetDate = new Date(dateStr);
+    const searchDateStr = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     
-    // Calculate the data date (day before target date)
-    const dataDate = new Date(targetDate);
-    dataDate.setDate(dataDate.getDate() - 1);
-    const filenameDateStr = Utilities.formatDate(dataDate, Session.getScriptTimeZone(), 'yyyyMMdd');
+    // Gmail's date search: use after:(day before) before:(day after) to get emails ON target date
+    const dayBefore = new Date(targetDate);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const dayAfter = new Date(targetDate);
+    dayAfter.setDate(dayAfter.getDate() + 1);
     
-    Logger.log(`Looking for ${dateStr} data (filename date: ${filenameDateStr})`);
+    const beforeStr = Utilities.formatDate(dayBefore, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    const afterStr = Utilities.formatDate(dayAfter, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     
-    // Search Gmail for raw data emails (subject has no date)
-    const searchQuery = `subject:"BKCM360 Global QA Check" has:attachment`;
+    const fullQuery = `subject:"BKCM360 Global QA Check" has:attachment after:${beforeStr} before:${afterStr}`;
     
-    // Search emails on the target date (when they were sent)
-    const searchDate = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-    const dateFilter = `on:${searchDate}`;
-    const fullQuery = `${searchQuery} ${dateFilter}`;
-    Logger.log(`Gmail search: ${fullQuery}`);
+    Logger.log(`Searching for ${dateStr} (${filenameDateStr}): ${fullQuery}`);
     
-    const threads = GmailApp.search(fullQuery, 0, 10);
+    const threads = GmailApp.search(fullQuery, 0, 20);
     
     if (threads.length === 0) {
       return { success: false, filesFound: 0, errorMsg: 'No emails found on target date' };
@@ -8353,10 +8351,8 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
           const filename = attachment.getName();
           
           // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}.{csv|zip}
-          // Check if filename matches our network AND data date
           if (filename.startsWith(`${networkId}_`) && filename.includes(`_${filenameDateStr}_`)) {
             Logger.log(`  ✅ MATCH: ${filename}`);
-            // Save to Drive
             const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
             if (saved) {
               filesFound++;
@@ -8367,7 +8363,7 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
     }
     
     if (filesFound === 0) {
-      return { success: false, filesFound: 0, errorMsg: `No files found for network ${networkId} with data date ${filenameDateStr}` };
+      return { success: false, filesFound: 0, errorMsg: `No files found for network ${networkId} on ${filenameDateStr}` };
     }
     
     return { success: true, filesFound, errorMsg: '' };
