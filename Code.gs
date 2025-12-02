@@ -8325,10 +8325,10 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
     const dayAfter = new Date(targetDate);
     dayAfter.setDate(dayAfter.getDate() + 1);
     
-    const beforeStr = Utilities.formatDate(dayBefore, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-    const afterStr = Utilities.formatDate(dayAfter, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    const afterStr = Utilities.formatDate(dayBefore, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    const beforeStr = Utilities.formatDate(dayAfter, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     
-    const fullQuery = `subject:"BKCM360 Global QA Check" has:attachment after:${beforeStr} before:${afterStr}`;
+    const fullQuery = `subject:"BKCM360 Global QA Check" has:attachment after:${afterStr} before:${beforeStr}`;
     
     Logger.log(`Searching for ${dateStr} (${filenameDateStr}): ${fullQuery}`);
     
