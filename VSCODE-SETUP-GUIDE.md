@@ -6,6 +6,54 @@
 
 ---
 
+## 📑 Table of Contents
+
+### Quick Navigation
+- [⚡ TLDR - Quick Start](#-tldr---just-tell-me-what-buttons-to-click) - For people who just want to push buttons
+- [🎯 What You'll Have When Done](#-what-youll-have-when-done)
+- [📋 Prerequisites](#-prerequisites)
+
+### Installation Steps
+- [STEP 1: Create GitHub Account](#step-1-create-your-github-account-if-you-dont-have-one)
+- [STEP 2: Install Git](#step-2-install-git)
+- [STEP 3: Configure Git](#step-3-configure-git-with-your-info)
+- [STEP 4: Install Node.js](#step-4-install-nodejs)
+- [STEP 5: Install VS Code](#step-5-install-vs-code)
+- [STEP 6: Install GitHub Copilot](#step-6-install-github-copilot-ai-assistant)
+- [STEP 7: Install VS Code Extensions](#step-7-install-additional-vs-code-extensions)
+- [STEP 8: Install clasp](#step-8-install-clasp-google-apps-script-cli)
+- [STEP 9: Authenticate clasp](#step-9-authenticate-clasp-with-google)
+
+### Project Setup
+- [STEP 10: Start a New Project](#-starting-a-new-google-apps-script-project)
+  - [Option A: Start from Scratch](#option-a-start-from-scratch-new-project)
+  - [Option B: Clone Existing Project](#option-b-clone-an-existing-project-from-github)
+- [STEP 11: Link to Apps Script](#step-11-link-to-your-google-apps-script-project)
+- [STEP 12: Open in VS Code](#step-12-open-project-in-vs-code)
+- [STEP 13: Push Code](#step-13-push-code-to-apps-script)
+- [STEP 14: Verify Deployment](#step-14-verify-in-apps-script-web-editor)
+- [STEP 15: Bind to Spreadsheet](#step-15-bind-script-to-a-google-spreadsheet-if-needed)
+- [STEP 16: Setup GitHub Repository](#step-16-set-up-github-repository-version-control)
+
+### Daily Usage
+- [🔄 Daily Development Workflow](#-daily-development-workflow)
+- [🤖 Using GitHub Copilot](#-using-github-copilot)
+- [🛠️ Essential Commands Reference](#%EF%B8%8F-essential-commands-reference)
+
+### Reference
+- [📁 Project File Structure](#-typical-project-file-structure)
+- [🔐 Security & Best Practices](#-security--best-practices)
+- [🚨 Troubleshooting](#-troubleshooting-common-issues)
+- [🎯 Complete Setup Checklist](#-complete-setup-checklist)
+- [💡 Pro Tips](#-pro-tips)
+- [🚀 Advanced: Google Cloud Platform](#-advanced-google-cloud-platform-optional)
+- [📚 Where to Go from Here](#-where-to-go-from-here)
+
+### Glossary
+- [📖 Glossary of Terms](#-glossary-of-terms)
+
+---
+
 ## 🎯 What You'll Have When Done
 
 - ✅ Professional code editor (VS Code)
@@ -1302,3 +1350,120 @@ If you MUST use a network drive:
 ---
 
 **That's it!** For detailed explanations of what each step does, read the full guide above.
+
+---
+
+## 📖 Glossary of Terms
+
+**Not sure what something means? Here's a quick reference:**
+
+### Development Tools
+
+| Term | What It Is | Why You Need It |
+|------|------------|-----------------|
+| **VS Code** | Visual Studio Code - A free code editor by Microsoft | Where you write and edit your code. Think of it like Microsoft Word, but for code. |
+| **Git** | Version control system | Tracks all changes to your code so you can go back to earlier versions if something breaks. Like "Track Changes" in Word. |
+| **GitHub** | Website for hosting code | Online storage for your code. Like Google Drive, but specifically for code projects. |
+| **clasp** | Command Line Apps Script | Tool that sends your code from VS Code to Google Apps Script. The bridge between your computer and Google. |
+| **Node.js** | JavaScript runtime | Software needed to run clasp. You won't interact with it directly, but clasp needs it installed. |
+| **npm** | Node Package Manager | Installs coding tools like clasp. Comes with Node.js automatically. |
+| **PowerShell** | Windows command-line tool | Terminal where you type commands instead of clicking buttons. Built into Windows. |
+
+### Apps Script Concepts
+
+| Term | What It Is | Example |
+|------|------------|---------|
+| **Apps Script** | Google's coding platform for automating Google Workspace | Write code to automate Google Sheets, Gmail, Drive, etc. |
+| **Script ID** | Unique identifier for your Apps Script project | `1a2b3c4d5e6f7g8h9i0j` - Found in Apps Script project settings |
+| **.gs file** | Google Script file extension | `Code.gs`, `Functions.gs` - Your actual code files |
+| **Bound Script** | Script attached to a specific spreadsheet | Opens when you go to Extensions → Apps Script in the sheet |
+| **Standalone Script** | Script not attached to any file | Exists on its own in Google Drive |
+| **Trigger** | Automated scheduler for your functions | Run a function every day at 9am, or when spreadsheet opens |
+
+### Copilot Terms
+
+| Term | What It Is | How It Helps |
+|------|------------|--------------|
+| **GitHub Copilot** | AI coding assistant | Suggests code as you type, like autocomplete on steroids |
+| **Copilot Chat** | Chat interface with Copilot | Ask questions like "How do I send an email?" and get code |
+| **Inline Suggestion** | Gray text that appears as you type | Press Tab to accept, Esc to reject |
+| **Completion** | Single code suggestion | Each time Copilot suggests code, that's one "completion" |
+| **Free Tier Limit** | Monthly cap on completions | Free users get limited suggestions per month |
+
+### Git & GitHub Terms
+
+| Term | What It Is | When You Use It |
+|------|------------|-----------------|
+| **Repository (repo)** | Project folder with all your code | Your entire project stored on GitHub |
+| **Commit** | Saved snapshot of your code | "Save point" you can return to later |
+| **Push** | Send changes to GitHub | Upload your local changes to the cloud |
+| **Pull** | Get changes from GitHub | Download latest code from the cloud |
+| **Clone** | Copy a repository to your computer | Download someone else's project to work on |
+| **Branch** | Separate version of your code | Test new features without breaking main code |
+| **Remote** | GitHub URL for your repository | The "address" of your project on GitHub |
+| **Local** | Files on your computer | Your copy of the code that you edit |
+
+### File & Configuration Terms
+
+| Term | What It Is | Example |
+|------|------------|---------|
+| **.clasp.json** | Configuration file linking to your script | `{"scriptId": "abc123"}` - DON'T commit to Git! |
+| **.gitignore** | List of files Git should ignore | Prevents sensitive files from going to GitHub |
+| **appsscript.json** | Apps Script configuration file | Sets timezone, enabled APIs, runtime version |
+| **Personal Access Token** | Password for GitHub CLI access | Used instead of your actual password for `git push` |
+| **Script Properties** | Storage for your script's data | Like variables that persist between runs |
+
+### Network & Storage Terms
+
+| Term | What It Is | When You'd Use It |
+|------|------------|-------------------|
+| **Local Drive** | Your computer's hard drive (C:) | Recommended for most people - faster, works offline |
+| **Network Drive** | Shared company drive (Z:, etc.) | Only if you need to access from multiple locations |
+| **VPN** | Virtual Private Network | Secure connection to company network (required for network drives) |
+| **Mapped Drive** | Network folder that appears as a drive letter | Z:\\ might actually be \\\\company\\share |
+
+### Common Commands Explained
+
+| Command | What It Does | Example |
+|---------|--------------|---------|
+| `cd` | Change Directory - move to a folder | `cd C:\Projects` |
+| `mkdir` | Make Directory - create a new folder | `mkdir MyProject` |
+| `clasp push` | Push code to Google Apps Script | Uploads your .gs files |
+| `clasp pull` | Pull code from Apps Script | Downloads latest from Google |
+| `clasp open` | Open project in browser | Opens Apps Script editor |
+| `git add .` | Stage all changes for commit | Prepares files to be saved |
+| `git commit -m` | Save changes with a message | Creates a save point |
+| `git push` | Upload to GitHub | Sends commits to the cloud |
+| `code .` | Open current folder in VS Code | `.` means "current folder" |
+
+### Common Errors Decoded
+
+| Error Message | What It Means | Fix |
+|---------------|---------------|-----|
+| "Command not found" | Tool isn't installed or PowerShell needs restart | Close/reopen PowerShell or restart computer |
+| "Permission denied" | Wrong Google account or not authenticated | Run `clasp logout` then `clasp login` |
+| "No files to push" | Nothing to upload | Make sure you have .gs files and check .claspignore |
+| "Script ID not found" | Wrong ID in .clasp.json | Copy Script ID from Apps Script → Settings |
+| "Authentication failed" (Git) | Need Personal Access Token, not password | Create token at github.com/settings/tokens |
+| "Not authorized" (clasp) | Not logged in or wrong account | Run `clasp login` |
+
+### Abbreviations & Acronyms
+
+| Abbreviation | Full Name | What It Means |
+|--------------|-----------|---------------|
+| **API** | Application Programming Interface | How different programs talk to each other |
+| **CLI** | Command Line Interface | Tools you use by typing commands (like clasp) |
+| **GUI** | Graphical User Interface | Tools with buttons and windows you click |
+| **JSON** | JavaScript Object Notation | File format for configuration (.clasp.json, appsscript.json) |
+| **IDE** | Integrated Development Environment | Fancy term for code editor (VS Code is an IDE) |
+| **VCS** | Version Control System | Git is a VCS - tracks changes to code |
+| **GCP** | Google Cloud Platform | Advanced Google services (BigQuery, Cloud Storage) |
+| **OAuth** | Open Authorization | How apps get permission to access your Google account |
+
+---
+
+**💡 Tip**: Bookmark this glossary! You'll refer back to it as you learn.
+
+---
+
+**[↑ Back to Top](#-table-of-contents)**
