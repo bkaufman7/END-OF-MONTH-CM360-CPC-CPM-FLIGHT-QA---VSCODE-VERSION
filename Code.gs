@@ -7131,13 +7131,18 @@ function getMissingDatesFromAudit_() {
   
   const data = auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, 2).getValues();
   const missingDates = [];
+  const startDate = new Date('2025-04-14');
   
   for (const row of data) {
     const dateStr = row[0];
     const status = row[1];
     
     if (status === '❌ MISSING' && dateStr) {
-      missingDates.push(String(dateStr));
+      const checkDate = new Date(dateStr);
+      // Skip dates before 4.14.25 - no data exists
+      if (checkDate >= startDate) {
+        missingDates.push(String(dateStr));
+      }
     }
   }
   
