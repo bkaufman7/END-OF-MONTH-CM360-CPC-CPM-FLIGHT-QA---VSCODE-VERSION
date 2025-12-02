@@ -6544,12 +6544,288 @@ function getNextDate_(dateStr) {
 // ========================================= AUDIT DASHBOARD SYSTEM ===================================================
 // =====================================================================================================================
 
+// Constants for Raw Data Audit chunking
+const RAW_DATA_AUDIT_STATE_KEY = 'raw_data_audit_state';
+const RAW_DATA_AUDIT_TIME_BUDGET_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Combined function to setup and refresh Raw Data audit in one click
  */
 function setupAndRefreshRawDataAudit() {
   setupAuditDashboard();
-  refreshAuditDashboard();
+  refreshAuditDashboardChunked();
+}
+
+/**
+ * Get Raw Data audit state
+ */
+function getRawDataAuditState_() {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    const stateJson = props.getProperty(RAW_DATA_AUDIT_STATE_KEY);
+    return stateJson ? JSON.parse(stateJson) : null;
+  } catch (e) {
+    Logger.log('Error loading raw data audit state: ' + e);
+    return null;
+  }
+}
+
+/**
+ * Save Raw Data audit state
+ */
+function saveRawDataAuditState_(state) {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    props.setProperty(RAW_DATA_AUDIT_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    Logger.log('Error saving raw data audit state: ' + e);
+  }
+}
+
+/**
+ * Clear Raw Data audit state
+ */
+function clearRawDataAuditState_() {
+  const props = PropertiesService.getDocumentProperties();
+  props.deleteProperty(RAW_DATA_AUDIT_STATE_KEY);
+}
+
+/**
+ * Refresh audit dashboard with chunking support
+ */
+function refreshAuditDashboardChunked() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet) {
+    setupAuditDashboard();
+    sheet = ss.getSheetByName("Audit Dashboard");
+  }
+  
+  const startTime = Date.now();
+  let state = getRawDataAuditState_();
+  
+  // Initialize state if first run
+  if (!state) {
+    state = {
+      dateData: {},
+      monthsProcessed: [],
+      allNetworks: [],
+      startTime: new Date().toISOString()
+    };
+    
+    // Get all networks
+    const networksSheet = ss.getSheetByName("Networks");
+    if (networksSheet) {
+      const networkData = networksSheet.getDataRange().getValues();
+      for (let i = 1; i < networkData.length; i++) {
+        const networkId = String(networkData[i][0] || '').trim();
+        if (networkId) {
+          state.allNetworks.push(networkId);
+        }
+      }
+    }
+  }
+  
+  const allNetworks = new Set(state.allNetworks);
+  const dateData = state.dateData;
+  
+  // Scan Drive with chunking
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  
+  const yearFolders = rootFolder.getFoldersByName('2025');
+  if (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    const monthFolders = yearFolder.getFolders();
+    const monthFoldersList = [];
+    
+    while (monthFolders.hasNext()) {
+      monthFoldersList.push(monthFolders.next());
+    }
+    
+    // Process month folders
+    for (const monthFolder of monthFoldersList) {
+      const monthName = monthFolder.getName();
+      
+      // Skip if already processed
+      if (state.monthsProcessed.includes(monthName)) {
+        continue;
+      }
+      
+      // Check time budget
+      if ((Date.now() - startTime) >= RAW_DATA_AUDIT_TIME_BUDGET_MS) {
+        Logger.log(`⏸️ Time budget reached. Saving progress. Processed ${state.monthsProcessed.length}/${monthFoldersList.length} months.`);
+        saveRawDataAuditState_(state);
+        
+        SpreadsheetApp.getUi().alert(
+          '⏸️ Audit Paused',
+          `Time limit reached. Progress saved.\n\n` +
+          `Processed: ${state.monthsProcessed.length}/${monthFoldersList.length} months\n\n` +
+          `Run again to continue, or create an auto-resume trigger.`,
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+        return;
+      }
+      
+      Logger.log(`Processing month folder: ${monthName}`);
+      
+      const dateFolders = monthFolder.getFolders();
+      while (dateFolders.hasNext()) {
+        const dateFolder = dateFolders.next();
+        const dateStr = dateFolder.getName();
+        
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+        
+        if (!dateData[dateStr]) {
+          dateData[dateStr] = { files: 0, networks: [] };
+        }
+        
+        const files = dateFolder.getFiles();
+        while (files.hasNext()) {
+          const file = files.next();
+          const filename = file.getName();
+          
+          const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+          if (networkId) {
+            dateData[dateStr].files++;
+            if (!dateData[dateStr].networks.includes(networkId)) {
+              dateData[dateStr].networks.push(networkId);
+            }
+          }
+        }
+      }
+      
+      state.monthsProcessed.push(monthName);
+      state.dateData = dateData;
+    }
+  }
+  
+  // All months processed - generate final report
+  generateRawDataAuditReport_(sheet, dateData, allNetworks);
+  clearRawDataAuditState_();
+  
+  const elapsed = (Date.now() - startTime) / 1000;
+  SpreadsheetApp.getUi().alert(
+    '✅ Raw Data Audit Complete',
+    `Finished scanning all months in ${elapsed.toFixed(1)}s.\n\n` +
+    `Check the Audit Dashboard sheet for results.`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Generate the audit report from collected data
+ */
+function generateRawDataAuditReport_(sheet, dateData, allNetworks) {
+  // Generate date range (May 1 - Nov 30, 2025)
+  const startDate = new Date('2025-05-01');
+  const endDate = new Date('2025-11-30');
+  const allDates = [];
+  
+  const current = new Date(startDate);
+  while (current <= endDate) {
+    allDates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+    current.setDate(current.getDate() + 1);
+  }
+  
+  // Build rows
+  const rows = [];
+  let missingCount = 0;
+  let partialCount = 0;
+  let completeCount = 0;
+  
+  for (const dateStr of allDates) {
+    const data = dateData[dateStr];
+    
+    if (!data || data.files === 0) {
+      rows.push([
+        dateStr,
+        '❌ MISSING',
+        0,
+        0,
+        'All networks',
+        'Use Time Machine'
+      ]);
+      missingCount++;
+    } else {
+      const foundNetworks = data.networks.length;
+      const missingNetworks = [];
+      
+      allNetworks.forEach(netId => {
+        if (!data.networks.includes(netId)) {
+          missingNetworks.push(netId);
+        }
+      });
+      
+      if (missingNetworks.length === 0) {
+        rows.push([
+          dateStr,
+          '✅ COMPLETE',
+          data.files,
+          foundNetworks,
+          '—',
+          '—'
+        ]);
+        completeCount++;
+      } else {
+        rows.push([
+          dateStr,
+          '⚠️ PARTIAL',
+          data.files,
+          foundNetworks,
+          missingNetworks.join(', '),
+          'Use Gap-Fill'
+        ]);
+        partialCount++;
+      }
+    }
+  }
+  
+  // Clear existing data (keep headers)
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).clear();
+  }
+  
+  // Write data
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+    
+    // Format status column
+    for (let i = 0; i < rows.length; i++) {
+      const statusCell = sheet.getRange(i + 2, 2);
+      const status = rows[i][1];
+      
+      if (status === '✅ COMPLETE') {
+        statusCell.setBackground('#d4edda').setFontColor('#155724');
+      } else if (status === '⚠️ PARTIAL') {
+        statusCell.setBackground('#fff3cd').setFontColor('#856404');
+      } else if (status === '❌ MISSING') {
+        statusCell.setBackground('#f8d7da').setFontColor('#721c24');
+      }
+    }
+  }
+  
+  // Add summary at top
+  sheet.insertRowBefore(1);
+  sheet.getRange(1, 1, 1, 6).merge();
+  sheet.getRange(1, 1).setValue(
+    `📊 Archive Audit Summary: ${completeCount} Complete | ${partialCount} Partial | ${missingCount} Missing | Total: ${allDates.length} days`
+  )
+    .setFontSize(12)
+    .setFontWeight("bold")
+    .setBackground("#e8f0fe")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  
+  sheet.setRowHeight(1, 35);
+}
+
+/**
+ * Legacy function - now calls chunked version
+ */
+function refreshAuditDashboard() {
+  refreshAuditDashboardChunked();
 }
 
 /**
