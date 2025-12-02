@@ -8319,18 +8319,18 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
     const searchQuery = `subject:"BKCM360 Global QA Check" has:attachment`;
     Logger.log(`Searching Gmail: ${searchQuery}`);
     
-    // Search recent emails (within 30 days of target date)
+    // Search emails within ±1 day of target date (emails arrive same day, but allow small buffer)
     const targetDate = new Date(dateStr);
     const startDate = new Date(targetDate);
-    startDate.setDate(startDate.getDate() - 15);
+    startDate.setDate(startDate.getDate() - 1);
     const endDate = new Date(targetDate);
-    endDate.setDate(endDate.getDate() + 15);
+    endDate.setDate(endDate.getDate() + 1);
     
     const dateFilter = `after:${Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'yyyy/MM/dd')} before:${Utilities.formatDate(endDate, Session.getScriptTimeZone(), 'yyyy/MM/dd')}`;
     const fullQuery = `${searchQuery} ${dateFilter}`;
     Logger.log(`Full search: ${fullQuery}`);
     
-    const threads = GmailApp.search(fullQuery, 0, 50); // Get up to 50 emails
+    const threads = GmailApp.search(fullQuery, 0, 10); // Get up to 10 emails (should be plenty for ±1 day)
     
     if (threads.length === 0) {
       return { success: false, filesFound: 0, errorMsg: 'No emails found in date range' };
