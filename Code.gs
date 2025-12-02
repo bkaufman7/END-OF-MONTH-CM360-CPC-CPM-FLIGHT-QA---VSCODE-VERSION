@@ -7277,15 +7277,6 @@ function getMonthFolderName_(dateStr) {
  * Returns {found: boolean, attachment: Blob, filename: string}
  */
 function searchGmailForViolationsAttachment_(dateStr) {
-  // Violations emails only started on 4.14.25
-  const startDate = new Date('2025-04-14');
-  const checkDate = new Date(dateStr);
-  
-  if (checkDate < startDate) {
-    Logger.log(`⏭️ Skipping email check for ${dateStr} (before 4.14.25)`);
-    return { found: false, attachment: null, filename: null };
-  }
-  
   const emailDateFormat = formatDateForEmail_(dateStr); // "04.23.25"
   
   // Search for violations email on that date
@@ -7502,6 +7493,17 @@ function processGapFillChunk_() {
  */
 function runTimeMachineForDate_(dateStr) {
   try {
+    // Check if date is before data collection started (4.14.25)
+    const startDate = new Date('2025-04-14');
+    const checkDate = new Date(dateStr);
+    
+    if (checkDate < startDate) {
+      return { 
+        success: false, 
+        error: 'No data available before 4.14.25 (data collection start date)' 
+      };
+    }
+    
     // Clear sheets
     clearRawData();
     clearViolations();
