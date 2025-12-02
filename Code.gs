@@ -24,6 +24,10 @@ function onOpen() {
       .addItem("🎯 Setup Time Machine Sheet", "setupTimeMachineSheet")
       .addItem("🔄 Run QA for Selected Date", "runTimeMachineQA"))
     .addSeparator()
+    .addSubMenu(ui.createMenu("📋 Audit Dashboard")
+      .addItem("🎯 Setup Audit Dashboard", "setupAuditDashboard")
+      .addItem("🔄 Refresh Audit (Scan Drive)", "refreshAuditDashboard"))
+    .addSeparator()
     .addSubMenu(ui.createMenu("📊 V2 Dashboard (BETA)")
       .addItem("🎯 Generate V2 Dashboard", "generateViolationsV2Dashboard")
       .addItem("💾 Export V2 to Drive", "exportV2ToDrive")
@@ -6510,6 +6514,248 @@ function getNextDate_(dateStr) {
 
 // =====================================================================================================================
 // ======================================= END TIME MACHINE SYSTEM ====================================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ========================================= AUDIT DASHBOARD SYSTEM ===================================================
+// =====================================================================================================================
+
+/**
+ * Setup Audit Dashboard sheet with date tracking
+ */
+function setupAuditDashboard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("Audit Dashboard");
+  }
+  
+  sheet.clear();
+  
+  // Set up columns
+  sheet.setColumnWidth(1, 120); // Date
+  sheet.setColumnWidth(2, 100); // Status
+  sheet.setColumnWidth(3, 150); // Files in Drive
+  sheet.setColumnWidth(4, 150); // Networks Found
+  sheet.setColumnWidth(5, 300); // Missing Networks
+  sheet.setColumnWidth(6, 200); // Action
+  
+  // Headers
+  const headers = [
+    ["Date", "Status", "Files in Drive", "Networks Found", "Missing Networks", "Action"]
+  ];
+  
+  sheet.getRange(1, 1, 1, 6).setValues(headers)
+    .setFontWeight("bold")
+    .setBackground("#4285f4")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  
+  sheet.setFrozenRows(1);
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Audit Dashboard Ready',
+    'Audit Dashboard sheet created!\n\n' +
+    'Click "Refresh Audit" from the menu to scan your Drive and populate the dashboard.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Refresh audit dashboard by scanning Drive
+ */
+function refreshAuditDashboard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert(
+      '❌ Dashboard Not Found',
+      'Please run "Setup Audit Dashboard" first.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  
+  const ui = SpreadsheetApp.getUi();
+  ui.alert('🔄 Scanning Drive', 'Scanning your Drive folder structure...\n\nThis may take a minute.', ui.ButtonSet.OK);
+  
+  // Get all networks
+  const networksSheet = ss.getSheetByName("Networks");
+  const allNetworks = new Set();
+  
+  if (networksSheet) {
+    const networkData = networksSheet.getDataRange().getValues();
+    for (let i = 1; i < networkData.length; i++) {
+      const networkId = String(networkData[i][0] || '').trim();
+      if (networkId) {
+        allNetworks.add(networkId);
+      }
+    }
+  }
+  
+  // Scan Drive
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  
+  const dateData = {}; // date => { files: count, networks: Set }
+  
+  // Scan Raw Data folders
+  const yearFolders = rootFolder.getFoldersByName('2025');
+  if (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    const monthFolders = yearFolder.getFolders();
+    
+    while (monthFolders.hasNext()) {
+      const monthFolder = monthFolders.next();
+      const dateFolders = monthFolder.getFolders();
+      
+      while (dateFolders.hasNext()) {
+        const dateFolder = dateFolders.next();
+        const dateStr = dateFolder.getName(); // e.g., "2025-05-01"
+        
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+        
+        if (!dateData[dateStr]) {
+          dateData[dateStr] = { files: 0, networks: new Set() };
+        }
+        
+        const files = dateFolder.getFiles();
+        while (files.hasNext()) {
+          const file = files.next();
+          const filename = file.getName();
+          
+          // Extract network ID
+          const networkId = extractNetworkIdFromFilename_(filename, getNetworkMap_());
+          if (networkId) {
+            dateData[dateStr].files++;
+            dateData[dateStr].networks.add(networkId);
+          }
+        }
+      }
+    }
+  }
+  
+  // Generate date range (May 1 - Nov 30, 2025)
+  const startDate = new Date('2025-05-01');
+  const endDate = new Date('2025-11-30');
+  const allDates = [];
+  
+  const current = new Date(startDate);
+  while (current <= endDate) {
+    allDates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+    current.setDate(current.getDate() + 1);
+  }
+  
+  // Build rows
+  const rows = [];
+  let missingCount = 0;
+  let partialCount = 0;
+  let completeCount = 0;
+  
+  for (const dateStr of allDates) {
+    const data = dateData[dateStr];
+    
+    if (!data || data.files === 0) {
+      // Missing
+      rows.push([
+        dateStr,
+        '❌ MISSING',
+        0,
+        0,
+        'All networks',
+        'Use Time Machine'
+      ]);
+      missingCount++;
+    } else {
+      const foundNetworks = data.networks.size;
+      const missingNetworks = [];
+      
+      allNetworks.forEach(netId => {
+        if (!data.networks.has(netId)) {
+          missingNetworks.push(netId);
+        }
+      });
+      
+      if (missingNetworks.length === 0) {
+        // Complete
+        rows.push([
+          dateStr,
+          '✅ COMPLETE',
+          data.files,
+          foundNetworks,
+          '—',
+          '—'
+        ]);
+        completeCount++;
+      } else {
+        // Partial
+        rows.push([
+          dateStr,
+          '⚠️ PARTIAL',
+          data.files,
+          foundNetworks,
+          missingNetworks.join(', '),
+          'Use Gap-Fill'
+        ]);
+        partialCount++;
+      }
+    }
+  }
+  
+  // Clear existing data (keep headers)
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).clear();
+  }
+  
+  // Write data
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+    
+    // Format status column
+    for (let i = 0; i < rows.length; i++) {
+      const statusCell = sheet.getRange(i + 2, 2);
+      const status = rows[i][1];
+      
+      if (status === '✅ COMPLETE') {
+        statusCell.setBackground('#d4edda').setFontColor('#155724');
+      } else if (status === '⚠️ PARTIAL') {
+        statusCell.setBackground('#fff3cd').setFontColor('#856404');
+      } else if (status === '❌ MISSING') {
+        statusCell.setBackground('#f8d7da').setFontColor('#721c24');
+      }
+    }
+  }
+  
+  // Add summary at top
+  sheet.insertRowBefore(1);
+  sheet.getRange(1, 1, 1, 6).merge();
+  sheet.getRange(1, 1).setValue(
+    `📊 Archive Audit Summary: ${completeCount} Complete | ${partialCount} Partial | ${missingCount} Missing | Total: ${allDates.length} days`
+  )
+    .setFontSize(12)
+    .setFontWeight("bold")
+    .setBackground("#e8f0fe")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  
+  sheet.setRowHeight(1, 35);
+  
+  ui.alert(
+    '✅ Audit Complete',
+    `Scanned ${allDates.length} dates:\n\n` +
+    `✅ Complete: ${completeCount}\n` +
+    `⚠️ Partial: ${partialCount}\n` +
+    `❌ Missing: ${missingCount}\n\n` +
+    `Check the Audit Dashboard sheet for details.`,
+    ui.ButtonSet.OK
+  );
+}
+
+// =====================================================================================================================
+// ====================================== END AUDIT DASHBOARD SYSTEM ==================================================
 // =====================================================================================================================
 
 
