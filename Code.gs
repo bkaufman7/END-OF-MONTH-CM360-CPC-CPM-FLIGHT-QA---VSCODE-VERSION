@@ -25,8 +25,11 @@ function onOpen() {
       .addItem("🔄 Run QA for Selected Date", "runTimeMachineQA"))
     .addSeparator()
     .addSubMenu(ui.createMenu("📋 Audit Dashboard")
-      .addItem("🎯 Setup Audit Dashboard", "setupAuditDashboard")
-      .addItem("🔄 Refresh Audit (Scan Drive)", "refreshAuditDashboard"))
+      .addItem("🎯 Setup Raw Data Audit", "setupAuditDashboard")
+      .addItem("🔄 Refresh Raw Data Audit", "refreshAuditDashboard")
+      .addSeparator()
+      .addItem("📊 Setup Violations Audit", "setupViolationsAudit")
+      .addItem("🔄 Refresh Violations Audit", "refreshViolationsAudit"))
     .addSeparator()
     .addSubMenu(ui.createMenu("📊 V2 Dashboard (BETA)")
       .addItem("🎯 Generate V2 Dashboard", "generateViolationsV2Dashboard")
@@ -6756,6 +6759,260 @@ function refreshAuditDashboard() {
 
 // =====================================================================================================================
 // ====================================== END AUDIT DASHBOARD SYSTEM ==================================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ===================================== VIOLATIONS AUDIT DASHBOARD ===================================================
+// =====================================================================================================================
+
+/**
+ * Setup Violations Audit Dashboard sheet
+ */
+function setupViolationsAudit() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Violations Audit");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("Violations Audit");
+  }
+  
+  sheet.clear();
+  
+  // Set up columns
+  sheet.setColumnWidth(1, 120); // Date
+  sheet.setColumnWidth(2, 100); // Status
+  sheet.setColumnWidth(3, 200); // Gmail Subject
+  sheet.setColumnWidth(4, 200); // Drive File
+  sheet.setColumnWidth(5, 200); // Drive URL
+  
+  // Headers
+  const headers = [
+    ["Date", "Status", "Gmail Attachment", "Drive File", "Drive URL"]
+  ];
+  
+  sheet.getRange(1, 1, 1, 5).setValues(headers)
+    .setFontWeight("bold")
+    .setBackground("#f4b400")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  
+  sheet.setFrozenRows(1);
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Violations Audit Ready',
+    'Violations Audit sheet created!\n\n' +
+    'Click "Refresh Violations Audit" from the menu to scan Gmail and Drive.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Refresh violations audit by scanning Gmail and Drive
+ */
+function refreshViolationsAudit() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Violations Audit");
+  
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert(
+      '❌ Dashboard Not Found',
+      'Please run "Setup Violations Audit" first.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  
+  const ui = SpreadsheetApp.getUi();
+  ui.alert('🔄 Scanning Gmail & Drive', 'Scanning for Historical Violation Reports...\n\nThis may take a minute.', ui.ButtonSet.OK);
+  
+  // Generate date range (April 1 - November 30, 2025)
+  const startDate = new Date('2025-04-01');
+  const endDate = new Date('2025-11-30');
+  const allDates = [];
+  
+  const current = new Date(startDate);
+  while (current <= endDate) {
+    allDates.push(Utilities.formatDate(current, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+    current.setDate(current.getDate() + 1);
+  }
+  
+  // Scan Gmail for Historical Violation Reports
+  const gmailData = {}; // date => { subject, hasAttachment }
+  
+  for (const dateStr of allDates) {
+    const dateObj = new Date(dateStr);
+    const nextDate = new Date(dateObj);
+    nextDate.setDate(nextDate.getDate() + 1);
+    const nextDateStr = Utilities.formatDate(nextDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    
+    // Search for Historical Violation Report email
+    const query = `subject:"BKCM360 Historical Violation Report" after:${dateStr} before:${nextDateStr}`;
+    const threads = GmailApp.search(query, 0, 1);
+    
+    if (threads.length > 0) {
+      const msgs = threads[0].getMessages();
+      for (const msg of msgs) {
+        const attachments = msg.getAttachments();
+        gmailData[dateStr] = {
+          subject: msg.getSubject(),
+          hasAttachment: attachments.length > 0,
+          attachmentName: attachments.length > 0 ? attachments[0].getName() : null
+        };
+        break;
+      }
+    }
+  }
+  
+  // Scan Drive for Violations Reports
+  const driveData = {}; // date => { filename, url }
+  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+  const rootFolder = DriveApp.getFolderById(rootFolderId);
+  
+  const violationsFolders = rootFolder.getFoldersByName('Violations Reports');
+  if (violationsFolders.hasNext()) {
+    const violationsRoot = violationsFolders.next();
+    const yearFolders = violationsRoot.getFolders();
+    
+    while (yearFolders.hasNext()) {
+      const yearFolder = yearFolders.next();
+      const monthFolders = yearFolder.getFolders();
+      
+      while (monthFolders.hasNext()) {
+        const monthFolder = monthFolders.next();
+        const files = monthFolder.getFiles();
+        
+        while (files.hasNext()) {
+          const file = files.next();
+          const filename = file.getName();
+          
+          // Extract date from filename (e.g., "CM360_Violations_2025-05-15.xlsx")
+          const dateMatch = filename.match(/(\d{4}-\d{2}-\d{2})/);
+          if (dateMatch) {
+            const dateStr = dateMatch[1];
+            driveData[dateStr] = {
+              filename: filename,
+              url: file.getUrl()
+            };
+          }
+        }
+      }
+    }
+  }
+  
+  // Build rows
+  const rows = [];
+  let missingCount = 0;
+  let gmailOnlyCount = 0;
+  let completeCount = 0;
+  
+  for (const dateStr of allDates) {
+    const gmail = gmailData[dateStr];
+    const drive = driveData[dateStr];
+    
+    if (!gmail && !drive) {
+      // No email, no drive file
+      rows.push([
+        dateStr,
+        '❌ MISSING',
+        '—',
+        '—',
+        '—'
+      ]);
+      missingCount++;
+    } else if (gmail && !drive) {
+      // Email exists but not saved to Drive
+      rows.push([
+        dateStr,
+        '⚠️ GMAIL ONLY',
+        gmail.attachmentName || 'No attachment',
+        '—',
+        '—'
+      ]);
+      gmailOnlyCount++;
+    } else if (!gmail && drive) {
+      // Drive file exists but no email (manually uploaded?)
+      rows.push([
+        dateStr,
+        '✅ IN DRIVE',
+        '—',
+        drive.filename,
+        drive.url
+      ]);
+      completeCount++;
+    } else {
+      // Both exist
+      rows.push([
+        dateStr,
+        '✅ COMPLETE',
+        gmail.attachmentName || 'Unknown',
+        drive.filename,
+        drive.url
+      ]);
+      completeCount++;
+    }
+  }
+  
+  // Clear existing data (keep headers)
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).clear();
+  }
+  
+  // Write data
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
+    
+    // Format status column
+    for (let i = 0; i < rows.length; i++) {
+      const statusCell = sheet.getRange(i + 2, 2);
+      const status = rows[i][1];
+      
+      if (status === '✅ COMPLETE' || status === '✅ IN DRIVE') {
+        statusCell.setBackground('#d4edda').setFontColor('#155724');
+      } else if (status === '⚠️ GMAIL ONLY') {
+        statusCell.setBackground('#fff3cd').setFontColor('#856404');
+      } else if (status === '❌ MISSING') {
+        statusCell.setBackground('#f8d7da').setFontColor('#721c24');
+      }
+    }
+    
+    // Make Drive URLs clickable
+    for (let i = 0; i < rows.length; i++) {
+      const url = rows[i][4];
+      if (url && url !== '—') {
+        const urlCell = sheet.getRange(i + 2, 5);
+        urlCell.setFormula(`=HYPERLINK("${url}", "Open File")`);
+      }
+    }
+  }
+  
+  // Add summary at top
+  sheet.insertRowBefore(1);
+  sheet.getRange(1, 1, 1, 5).merge();
+  sheet.getRange(1, 1).setValue(
+    `📊 Violations Report Audit: ${completeCount} Complete | ${gmailOnlyCount} Gmail Only | ${missingCount} Missing | Total: ${allDates.length} days`
+  )
+    .setFontSize(12)
+    .setFontWeight("bold")
+    .setBackground("#fef7e0")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  
+  sheet.setRowHeight(1, 35);
+  
+  ui.alert(
+    '✅ Violations Audit Complete',
+    `Scanned ${allDates.length} dates (Apr 1 - Nov 30, 2025):\n\n` +
+    `✅ Complete: ${completeCount}\n` +
+    `⚠️ Gmail Only: ${gmailOnlyCount}\n` +
+    `❌ Missing: ${missingCount}\n\n` +
+    `Check the Violations Audit sheet for details.`,
+    ui.ButtonSet.OK
+  );
+}
+
+// =====================================================================================================================
+// =================================== END VIOLATIONS AUDIT DASHBOARD =================================================
 // =====================================================================================================================
 
 
