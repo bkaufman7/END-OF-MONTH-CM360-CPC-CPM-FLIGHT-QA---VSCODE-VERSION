@@ -8268,8 +8268,17 @@ function updateRawDataAuditNotes_(dateStr, message) {
   const data = sheet.getDataRange().getValues();
   
   for (let i = 0; i < data.length; i++) {
-    const cellValue = String(data[i][0] || '').trim();
-    if (cellValue === dateStr) {
+    const cellValue = data[i][0];
+    
+    // Handle Date objects
+    let cellDateStr = '';
+    if (cellValue instanceof Date && !isNaN(cellValue)) {
+      cellDateStr = Utilities.formatDate(cellValue, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    } else {
+      cellDateStr = String(cellValue || '').trim();
+    }
+    
+    if (cellDateStr === dateStr) {
       // Column G = index 6 (0-based), row is i+1 (1-based)
       sheet.getRange(i + 1, 7).setValue(message);
       SpreadsheetApp.flush(); // Force immediate update
@@ -8303,52 +8312,64 @@ function clearRawGapFillState_() {
  */
 function downloadRawDataForDateNetwork_(dateStr, networkId) {
   try {
-    // Format date for email search (MM.DD.YY)
-    const dateParts = dateStr.split('-');
-    const month = dateParts[1];
-    const day = dateParts[2];
-    const year = dateParts[0].substring(2);
-    const emailDateStr = `${month}.${day}.${year}`;
+    // Convert date to YYYYMMDD format for filename matching
+    const filenameDateStr = dateStr.replace(/-/g, ''); // 2025-05-11 -> 20250511
     
-    // Search Gmail for the raw data email
-    const searchQuery = `subject:"BKCM360 Global QA Check ${emailDateStr}" has:attachment`;
+    // Search Gmail for raw data emails (subject has no date)
+    const searchQuery = `subject:"BKCM360 Global QA Check" has:attachment`;
     Logger.log(`Searching Gmail: ${searchQuery}`);
     
-    const threads = GmailApp.search(searchQuery, 0, 1);
+    // Search recent emails (within 30 days of target date)
+    const targetDate = new Date(dateStr);
+    const startDate = new Date(targetDate);
+    startDate.setDate(startDate.getDate() - 15);
+    const endDate = new Date(targetDate);
+    endDate.setDate(endDate.getDate() + 15);
+    
+    const dateFilter = `after:${Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'yyyy/MM/dd')} before:${Utilities.formatDate(endDate, Session.getScriptTimeZone(), 'yyyy/MM/dd')}`;
+    const fullQuery = `${searchQuery} ${dateFilter}`;
+    Logger.log(`Full search: ${fullQuery}`);
+    
+    const threads = GmailApp.search(fullQuery, 0, 50); // Get up to 50 emails
     
     if (threads.length === 0) {
-      return { success: false, filesFound: 0, errorMsg: 'Email not found' };
+      return { success: false, filesFound: 0, errorMsg: 'No emails found in date range' };
     }
     
-    const messages = threads[0].getMessages();
     let filesFound = 0;
     
-    for (const message of messages) {
-      const attachments = message.getAttachments();
+    // Search through all matching emails
+    for (const thread of threads) {
+      const messages = thread.getMessages();
       
-      for (const attachment of attachments) {
-        const filename = attachment.getName();
+      for (const message of messages) {
+        const attachments = message.getAttachments();
         
-        // Check if this file belongs to the target network
-        if (filename.includes(`_${networkId}_`) || filename.includes(`_${networkId}.`)) {
-          // Save to Drive
-          const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
-          if (saved) {
-            filesFound++;
+        for (const attachment of attachments) {
+          const filename = attachment.getName();
+          
+          // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}
+          // Check if filename matches our network AND date
+          if (filename.startsWith(`${networkId}_`) && filename.includes(`_${filenameDateStr}_`)) {
+            // Save to Drive
+            const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
+            if (saved) {
+              filesFound++;
+            }
           }
         }
       }
     }
     
-    if (filesFound > 0) {
-      return { success: true, filesFound: filesFound, errorMsg: null };
-    } else {
-      return { success: false, filesFound: 0, errorMsg: `No files for network ${networkId}` };
+    if (filesFound === 0) {
+      return { success: false, filesFound: 0, errorMsg: `No files found for network ${networkId} on ${filenameDateStr}` };
     }
     
-  } catch (e) {
-    Logger.log(`Error downloading raw data for ${dateStr} / ${networkId}: ${e}`);
-    return { success: false, filesFound: 0, errorMsg: e.toString() };
+    return { success: true, filesFound, errorMsg: '' };
+    
+  } catch (error) {
+    Logger.log(`Error downloading raw data for ${dateStr} / ${networkId}: ${error.message}`);
+    return { success: false, filesFound: 0, errorMsg: error.message };
   }
 }
 
