@@ -1,4 +1,4 @@
-// =====================
+﻿// =====================
 // CM360 QA Tools Script
 // =====================
 // Adds custom menu, imports CM360 reports via Gmail, runs QA checks,
@@ -19,13 +19,13 @@ function onOpen() {
     
     // === ARCHIVE AUDITS ===
     .addSubMenu(ui.createMenu("📋 Archive Audits")
-      .addItem("📊 Raw Data Audit (Drive)", "setupAndRefreshRawDataAudit")
-      .addItem("📧 Violations Audit (Drive)", "setupAndRefreshViolationsAudit"))
+      .addItem("📊 Raw Data Audit (Check Drive)", "setupAndRefreshRawDataAudit")
+      .addItem("📦 Violations Audit (Gmail + Drive)", "setupAndRefreshViolationsAudit"))
     .addSeparator()
     
     // === RAW DATA GAP FILL ===
-    .addSubMenu(ui.createMenu("📦 Raw Data Gap Fill")
-      .addItem("🔄 Start Raw Data Gap Fill", "startRawDataGapFill")
+    .addSubMenu(ui.createMenu("🔄 Raw Data Gap Fill")
+      .addItem("▶️ Start Raw Data Gap Fill", "startRawDataGapFill")
       .addItem("📊 View Status", "viewRawDataGapFillStatus")
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createRawGapFillAutoResumeTrigger")
@@ -35,9 +35,9 @@ function onOpen() {
     .addSeparator()
     
     // === VIOLATIONS GAP FILL ===
-    .addSubMenu(ui.createMenu("🔧 Violations Gap Fill")
-      .addItem("🎯 Setup Progress Sheet", "setupGapFillProgressSheet")
-      .addItem("🔄 Start Auto Gap Fill", "startAutoGapFill")
+    .addSubMenu(ui.createMenu("🎯 Violations Gap Fill")
+      .addItem("💾 Setup Progress Sheet", "setupGapFillProgressSheet")
+      .addItem("▶️ Start Auto Gap Fill", "startAutoGapFill")
       .addItem("📊 View Status", "viewGapFillStatus")
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createGapFillAutoResumeTrigger")
@@ -48,43 +48,43 @@ function onOpen() {
     
     // === TIME MACHINE ===
     .addSubMenu(ui.createMenu("⏰ Time Machine")
-      .addItem("🎯 Setup Time Machine", "setupTimeMachineSheet")
-      .addItem("🔄 Run QA for Selected Date", "runTimeMachineQA"))
+      .addItem("⚙️ Setup Time Machine", "setupTimeMachineSheet")
+      .addItem("▶️ Run QA for Selected Date", "runTimeMachineQA"))
     .addSeparator()
     
     // === REPORTS & DASHBOARDS ===
-    .addSubMenu(ui.createMenu("📊 Reports & Dashboards")
-      .addItem("🎯 Generate V2 Dashboard", "generateViolationsV2Dashboard")
+    .addSubMenu(ui.createMenu("📈 Reports & Dashboards")
+      .addItem("📊 Generate V2 Dashboard", "generateViolationsV2Dashboard")
       .addItem("💾 Export V2 to Drive", "exportV2ToDrive")
-      .addItem("📊 Monthly Summary Report", "generateMonthlySummaryReport")
-      .addItem("📈 Month-over-Month Analysis", "runMonthOverMonthAnalysis")
+      .addItem("📋 Monthly Summary Report", "generateMonthlySummaryReport")
+      .addItem("📊 Month-over-Month Analysis", "runMonthOverMonthAnalysis")
       .addItem("💰 Calculate Financial Impact", "displayFinancialImpact"))
     .addSeparator()
     
     // === HISTORICAL ARCHIVE ===
     .addSubMenu(ui.createMenu("📁 Historical Archive")
-      .addItem("📁 Archive All (April-Nov 2025)", "archiveAllHistoricalReports")
+      .addItem("📦 Archive All (April-Nov 2025)", "archiveAllHistoricalReports")
       .addItem("📅 Archive Single Month", "archiveSingleMonth")
       .addItem("📊 View Archive Progress", "viewArchiveProgress")
-      .addItem("🔄 Resume Archive", "resumeArchive"))
+      .addItem("▶️ Resume Archive", "resumeArchive"))
     .addSeparator()
-    .addSubMenu(ui.createMenu("📦 Raw Data Archive")
+    .addSubMenu(ui.createMenu("📂 Raw Data Archive")
       .addItem("📦 Archive All Raw Data (Apr-Nov 2025)", "archiveAllRawData")
       .addItem("📊 View Raw Data Progress", "viewRawDataProgress")
       .addItem("📧 Email Detailed Progress Report", "emailDetailedProgressReport")
-      .addItem("🔄 Resume Raw Data Archive", "resumeRawDataArchive")
+      .addItem("▶️ Resume Raw Data Archive", "resumeRawDataArchive")
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger", "createRawDataAutoResumeTrigger")
       .addItem("🛑 Delete Auto-Resume Trigger", "deleteRawDataAutoResumeTrigger")
       .addSeparator()
-      .addItem("📅 Create Daily Progress Report (7:30 PM)", "createDailyProgressReportTrigger")
+      .addItem("📧 Create Daily Progress Report (7:30 PM)", "createDailyProgressReportTrigger")
       .addItem("🛑 Delete Daily Progress Report", "deleteDailyProgressReportTrigger")
       .addSeparator()
       .addItem("📂 Categorize Files by Network", "categorizeRawDataByNetwork")
-      .addItem("🔍 Audit Archive Completeness (Quick)", "auditRawDataArchive")
+      .addItem("🔬 Audit Archive Completeness (Quick)", "auditRawDataArchive")
       .addItem("🔬 Comprehensive Audit (Gmail vs Drive)", "auditRawDataArchiveComprehensive")
       .addSeparator()
-      .addItem("🔄 Resume Comprehensive Audit", "processComprehensiveAuditBatch_")
+      .addItem("▶️ Resume Comprehensive Audit", "processComprehensiveAuditBatch_")
       .addItem("📊 View Audit Progress", "viewComprehensiveAuditProgress")
       .addItem("🔄 Reset Comprehensive Audit", "resetComprehensiveAudit"))
     .addSeparator()
@@ -101,10 +101,22 @@ function onOpen() {
   setupTimeMachineIfExists_();
 }
 
-
-
-// ---------------------
-// one-time MailApp authorization helper
+/**
+ * Show menu loading error details
+ */
+function showMenuError_() {
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(
+    '`u{26A0}`u{FE0F} Menu Loading Error',
+    'The CM360 QA Tools menu failed to load.\n\n' +
+    'Check the Apps Script execution log (View > Executions) for details.\n\n' +
+    'Common causes:\n' +
+    '`u{2022} Missing or renamed functions\n' +
+    '`u{2022} Syntax errors in the script\n' +
+    '`u{2022} Authorization issues',
+    ui.ButtonSet.OK
+  );
+}
 // ---------------------
 function authorizeMail_() {
   // Running this from the editor or from the menu will force the OAuth prompt
@@ -442,7 +454,7 @@ function sendPerformanceSpikeAlertIfPre15() {
   ];
   if (req.some(function(k){ return hMap[k] === undefined; })) return;
 
-  const MATCH_TEXT = "🟨 PERFORMANCE: CTR ≥ 90% & CPM ≥ $10";
+  const MATCH_TEXT = "� PERFORMANCE: CTR �� 90% & CPM �� $10";
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const latestMap = loadLatestCacheMap_();
 
@@ -473,8 +485,8 @@ function sendPerformanceSpikeAlertIfPre15() {
     const changed = isNew || prev.imp !== imp || prev.clk !== clk;
 
     if (changed) {
-      const trimmedCampaign  = camp.length > 20 ? camp.substring(0, 20) + "…" : camp;
-      const trimmedPlacement = plc.length > 20 ? plc.substring(0, 20) + "…" : plc;
+      const trimmedCampaign  = camp.length > 20 ? camp.substring(0, 20) + "��" : camp;
+      const trimmedPlacement = plc.length > 20 ? plc.substring(0, 20) + "��" : plc;
 
       candidateRows.push({
         netId: netId, adv: adv,
@@ -518,14 +530,14 @@ function sendPerformanceSpikeAlertIfPre15() {
     + '<p><i>Brought to you by Platform Solutions Automation. (Made by: BK)</i></p>';
 
   const todayStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "M/d/yy");
-  const subject = 'ALERT – PERFORMANCE (pre-monthly-summary) – ' + todayStr + ' – ' + candidateRows.length + ' changed/new row(s)';
+  const subject = 'ALERT �� PERFORMANCE (pre-monthly-summary) �� ' + todayStr + ' �� ' + candidateRows.length + ' changed/new row(s)';
 
   uniqueEmails.forEach(function(addr){
     try {
       MailApp.sendEmail({ to: addr, subject: subject, htmlBody: table });
       Utilities.sleep(500);
     } catch (err) {
-      Logger.log('❌ Failed to email ' + addr + ': ' + err);
+      Logger.log('�� Failed to email ' + addr + ': ' + err);
     }
   });
 
@@ -719,7 +731,7 @@ function upsertViolationChange_(mapObj, key, rd, imp, clk, pe) {
 }
 
 // ---------------------
-// Owner/Rep mapping helpers + lookup from "Networks" (prefer OPS in P–S)
+// Owner/Rep mapping helpers + lookup from "Networks" (prefer OPS in P��S)
 // ---------------------
 function normalizeAdv_(s) {
   return String(s || '')
@@ -841,11 +853,11 @@ function getStaleThresholdDays_() {
 
 
 /*******************************************************
- * Low-Priority Scoring — Lightweight (NO sheets/logging)
+ * Low-Priority Scoring �� Lightweight (NO sheets/logging)
  *******************************************************/
 
 // Keep these defaults (same signal quality, no sheet I/O)
-const X_CH = "[x×✕]";
+const X_CH = "[x��]";
 const DEFAULT_LP_PATTERNS = [
   ['Impression Pixel/Beacon', `\\b0\\s*${X_CH}\\s*0\\b|\\bzero\\s*by\\s*zero\\b`, 40, 'Zero-size creative', 'Y'],
   ['Impression Pixel/Beacon', `\\b1\\s*${X_CH}\\s*1\\b|\\b1\\s*by\\s*1\\b|\\b1x1(?:cc)?\\b`, 30, '1x1 variants', 'Y'],
@@ -919,7 +931,7 @@ function compileLPPatternsIfNeeded_() {
 function normalizeName_(s) {
   return String(s || '')
     .toLowerCase()
-    .replace(/[×✕]/g, 'x')
+    .replace(/[��]/g, 'x')
     .replace(/\|/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -939,7 +951,7 @@ function scoreAndLabelLowPriority_(placementName, clicks, impr, rowIdOrIndex, ga
   compileLPPatternsIfNeeded_();
 
   if (gating === 'Mixed') {
-    // Don’t LP-tag rows where both metrics present (or pathological both+clicks>impr)
+    // Don��t LP-tag rows where both metrics present (or pathological both+clicks>impr)
     return '';
   }
 
@@ -956,11 +968,11 @@ function scoreAndLabelLowPriority_(placementName, clicks, impr, rowIdOrIndex, ga
     }
   }
 
-  // If Mixed, we’d subtract negatives; for single-metric add a tiny boost when size present
+  // If Mixed, we��d subtract negatives; for single-metric add a tiny boost when size present
   if (gating !== 'Mixed') {
     var sizeRgx = _negCompiled[0].re;
     if (sizeRgx && sizeRgx.test(s)) {
-      pos += 15; // helps 1x1 & obvious “pixel-ish” names
+      pos += 15; // helps 1x1 & obvious ��pixel-ish�� names
       catScores['Impression Pixel/Beacon'] = (catScores['Impression Pixel/Beacon'] || 0) + 15;
     }
   } else {
@@ -1001,7 +1013,7 @@ function scoreAndLabelLowPriority_(placementName, clicks, impr, rowIdOrIndex, ga
   if (!topCat) topCat = 'Impression Pixel/Beacon';
 
   // Descriptor only; no writes/logging
-  return 'Low Priority — ' + topCat + ' (' + band + ')';
+  return 'Low Priority �� ' + topCat + ' (' + band + ')';
 }
 
 
@@ -1053,7 +1065,7 @@ function runQAOnly() {
     const today = new Date();
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-    // —— Tweak these constants in your file (outside this function) ——
+    // ���� Tweak these constants in your file (outside this function) ����
     // const QA_CHUNK_ROWS = 3500;
     // const QA_TIME_BUDGET_MS = 4.2 * 60 * 1000;
 
@@ -1103,52 +1115,52 @@ function runQAOnly() {
       const details    = [];
       let risk = "";
 
-      // 🟥 BILLING
+      // ?? BILLING
       if (pe < firstOfMonth && clk > imp) {
-        issueTypes.push("🟥 BILLING: Expired CPC Risk");
+        issueTypes.push("?? BILLING: Expired CPC Risk");
         details.push("Ended " + pe.toDateString() + " with clicks (" + clk + ") > impressions (" + imp + ")");
-        risk = "🚨 Expired Risk";
+        risk = "?? Expired Risk";
       } else if (pe < rd && clk > imp) {
-        issueTypes.push("🟥 BILLING: Recently Expired CPC Risk");
+        issueTypes.push("� BILLING: Recently Expired CPC Risk");
         details.push("Ended " + pe.toDateString() + " and still has clicks > impressions");
-        risk = "⚠️ Expired This Month";
+        risk = "��️ Expired This Month";
       } else if (rd <= pe && clk > imp && cpc > 10) {
-        issueTypes.push("🟥 BILLING: Active CPC Billing Risk");
+        issueTypes.push("?? BILLING: Active CPC Billing Risk");
         details.push("Active: clicks (" + clk + ") > impressions (" + imp + "), $CPC = $" + cpc.toFixed(2));
-        risk = "⚠️ Active CPC Risk";
+        risk = "��️ Active CPC Risk";
       }
 
-      // 🟦 DELIVERY
+      // � DELIVERY
       if (pe < firstOfMonth && rd >= firstOfMonth && (imp > 0 || clk > 0)) {
-        issueTypes.push("🟦 DELIVERY: Post-Flight Activity");
+        issueTypes.push("� DELIVERY: Post-Flight Activity");
         details.push("Ended " + pe.toDateString() + " but has " + imp + " impressions and " + clk + " clicks");
       }
 
-      // 🟨 PERFORMANCE
+      // � PERFORMANCE
       if (ctr >= 90 && cpm >= 10) {
-        issueTypes.push("🟨 PERFORMANCE: CTR ≥ 90% & CPM ≥ $10");
+        issueTypes.push("� PERFORMANCE: CTR �� 90% & CPM �� $10");
         details.push("CTR = " + ctr.toFixed(2) + "%, $CPM = $" + cpm.toFixed(2));
       }
 
-      // 🟩 COST
+      // � COST
       let isCPMOnly = false;
       let isCPCOnly = false;
       if (cpc > 0 && cpm === 0 && cpc > 10) {
-        issueTypes.push("🟩 COST: CPC Only > $10");
+        issueTypes.push("� COST: CPC Only > $10");
         details.push("No CPM spend, $CPC = $" + cpc.toFixed(2));
         if (imp === 0 && clk > 0) isCPCOnly = true;
       }
       if (cpm > 0 && cpc === 0 && cpm > 10) {
-        issueTypes.push("🟩 COST: CPM Only > $10");
+        issueTypes.push("� COST: CPM Only > $10");
         details.push("No CPC spend, $CPM = $" + cpm.toFixed(2));
         if (imp > 0 && clk === 0) isCPMOnly = true;
       }
       if (cpc > 0 && cpm > 0 && clk > imp && cpc > 10) {
-        issueTypes.push("🟩 COST: CPC+CPM Clicks > Impr & CPC > $10");
+        issueTypes.push("� COST: CPC+CPM Clicks > Impr & CPC > $10");
         details.push("Clicks > impressions with both CPC and CPM charges (CPC = $" + cpc.toFixed(2) + ")");
       }
 
-      // --- Low-priority tagging via scorer (gating-aware) — no sheet writes ---
+      // --- Low-priority tagging via scorer (gating-aware) �� no sheet writes ---
       const bothMetricsPresent = imp > 0 && clk > 0;
       const clicksExceedImprWithBoth = bothMetricsPresent && (clk > imp);
       const gating = (imp > 0 && clk === 0) ? 'CPM-only' :
@@ -1159,7 +1171,7 @@ function runQAOnly() {
         const rowIdOrIndex = String(row[m["Placement ID"]] || (r + 1));
         const lpDescriptor = scoreAndLabelLowPriority_(placement, clk, imp, rowIdOrIndex, gating);
         if (lpDescriptor) {
-          issueTypes.push("🟩 COST: (Low Priority) " + lpDescriptor.replace(/^Low Priority —\s*/, ""));
+          issueTypes.push("� COST: (Low Priority) " + lpDescriptor.replace(/^Low Priority ��\s*/, ""));
         }
       }
       // --- end Low-priority tagging ---
@@ -1213,10 +1225,10 @@ function runQAOnly() {
     if (state.next >= (data.length)) {
       clearQAState_();
       cancelQAChunkTrigger_();
-      Logger.log("✅ runQAOnly complete. Processed all " + totalRows + " data rows.");
+      Logger.log("� runQAOnly complete. Processed all " + totalRows + " data rows.");
     } else {
       saveQAState_(state);
-      Logger.log("⏳ runQAOnly partial: processed " + processed + " rows this run. Next row index: "
+      Logger.log("�� runQAOnly partial: processed " + processed + " rows this run. Next row index: "
         + state.next + " / " + (data.length - 1));
       scheduleNextQAChunk_(2); // resume soon
     }
@@ -1246,7 +1258,7 @@ function _parsePct_(s) { // "95.00%" -> 95
 
 
 // ---------------------
-// sendEmailSummary (size-safe) — UPDATED with extra buckets
+// sendEmailSummary (size-safe) �� UPDATED with extra buckets
 // ---------------------
 function sendEmailSummary() {
   // Skip if QA is still running in chunks
@@ -1328,13 +1340,13 @@ function sendEmailSummary() {
     const id    = String(r[hMap["Network ID"]] || "");
     const types = String(r[hMap["Issue Type"]] || "").split(", ");
     if (!violationCounts[id]) {
-      violationCounts[id] = { "🟥 BILLING": 0, "🟦 DELIVERY": 0, "🟨 PERFORMANCE": 0, "🟩 COST": 0 };
+      violationCounts[id] = { "� BILLING": 0, "� DELIVERY": 0, "� PERFORMANCE": 0, "� COST": 0 };
     }
     types.forEach(function(t){
-      if (t.startsWith("🟥")) violationCounts[id]["🟥 BILLING"]++;
-      if (t.startsWith("🟦")) violationCounts[id]["🟦 DELIVERY"]++;
-      if (t.startsWith("🟨")) violationCounts[id]["🟨 PERFORMANCE"]++;
-      if (t.startsWith("🟩")) violationCounts[id]["🟩 COST"]++;
+      if (t.startsWith("�")) violationCounts[id]["� BILLING"]++;
+      if (t.startsWith("�")) violationCounts[id]["� DELIVERY"]++;
+      if (t.startsWith("�")) violationCounts[id]["� PERFORMANCE"]++;
+      if (t.startsWith("�")) violationCounts[id]["� COST"]++;
     });
   });
 
@@ -1344,35 +1356,35 @@ function sendEmailSummary() {
     + '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse: collapse; font-size: 11px;">'
     + '<tr style="background-color: #f2f2f2; font-weight: bold;">'
     + '<th>Network ID</th><th>Network Name</th><th>Placements Checked</th>'
-    + '<th>🟥 BILLING</th><th>🟦 DELIVERY</th><th>🟨 PERFORMANCE</th><th>🟩 COST</th>'
+    + '<th>� BILLING</th><th>� DELIVERY</th><th>� PERFORMANCE</th><th>� COST</th>'
     + '</tr>';
 
   Object.entries(networkNameMap)
     .filter(function(pair){
       const id = pair[0];
       if (INCLUDE_ZERO_NETS) return true;
-      const vc = violationCounts[id] || { "🟥 BILLING":0,"🟦 DELIVERY":0,"🟨 PERFORMANCE":0,"🟩 COST":0 };
-      const total = vc["🟥 BILLING"] + vc["🟦 DELIVERY"] + vc["🟨 PERFORMANCE"] + vc["🟩 COST"];
+      const vc = violationCounts[id] || { "� BILLING":0,"� DELIVERY":0,"� PERFORMANCE":0,"� COST":0 };
+      const total = vc["� BILLING"] + vc["� DELIVERY"] + vc["� PERFORMANCE"] + vc["� COST"];
       return total > 0;
     })
     .sort(function(a, b){ return a[1].localeCompare(b[1]); })
     .forEach(function(entry){
       const id = entry[0], name = entry[1];
       const pc = placementCounts[id] || 0;
-      const vc = violationCounts[id] || { "🟥 BILLING":0,"🟦 DELIVERY":0,"🟨 PERFORMANCE":0,"🟩 COST":0 };
+      const vc = violationCounts[id] || { "� BILLING":0,"� DELIVERY":0,"� PERFORMANCE":0,"� COST":0 };
       networkSummary += '<tr>'
         + '<td>' + id + '</td><td>' + name + '</td><td>' + pc + '</td>'
-        + '<td>' + vc["🟥 BILLING"] + '</td><td>' + vc["🟦 DELIVERY"] + '</td><td>' + vc["🟨 PERFORMANCE"] + '</td><td>' + vc["🟩 COST"] + '</td>'
+        + '<td>' + vc["� BILLING"] + '</td><td>' + vc["� DELIVERY"] + '</td><td>' + vc["� PERFORMANCE"] + '</td><td>' + vc["� COST"] + '</td>'
         + '</tr>';
     });
   networkSummary += '</table><br/>';
 
   // --- Grouped issue summary (unchanged) ---
-  const groupedCounts = { "🟥 BILLING": {}, "🟦 DELIVERY": {}, "🟨 PERFORMANCE": {}, "🟩 COST": {} };
+  const groupedCounts = { "� BILLING": {}, "� DELIVERY": {}, "� PERFORMANCE": {}, "� COST": {} };
   violations.slice(1).forEach(function(r){
     const types = String(r[hMap["Issue Type"]] || "").split(", ");
     types.forEach(function(t){
-      const match = t.match(/^(🟥|🟦|🟨|🟩)\s(\w+):\s(.+)/);
+      const match = t.match(/^(�|�|�|�)\s(\w+):\s(.+)/);
       if (match) {
         const emoji = match[1], group = match[2], subtype = match[3];
         const key = emoji + " " + group;
@@ -1392,7 +1404,7 @@ function sendEmailSummary() {
     summaryHtml += "</ul>";
   });
 
-  // --- Immediate Attention — Key Issues (by Owner) — UPDATED bucket logic
+  // --- Immediate Attention �� Key Issues (by Owner) �� UPDATED bucket logic
   function buildImmediateAttentionByOwner_() {
     const ownerMap = loadOwnerMapFromNetworks_();
   const perOwner = {};
@@ -1416,12 +1428,12 @@ function sendEmailSummary() {
 
   // bucket order (lower = higher priority in sort)
   const BUCKETS = {
-    PERF: 1,               // 🟨 Performance
-    COST_BIMBAL: 2,        // 🟩 CPC+CPM clicks>impr & $CPC>10
-    BILLING: 3,            // 🟥 (Active/Recently Expired/Expired) + tightened rules
-    DELIV_STRICT: 4,       // 🟦 Post-flight + clicks>impr + $CPC>10
-    DELIV_CPM_ONLY: 5,     // 🟦 Post-flight + CPM-only >$10
-    DELIV_GENERAL: 6       // 🟦 Post-flight (any activity) but only if $CPC>10 || $CPM>10
+    PERF: 1,               // � Performance
+    COST_BIMBAL: 2,        // � CPC+CPM clicks>impr & $CPC>10
+    BILLING: 3,            // � (Active/Recently Expired/Expired) + tightened rules
+    DELIV_STRICT: 4,       // � Post-flight + clicks>impr + $CPC>10
+    DELIV_CPM_ONLY: 5,     // � Post-flight + CPM-only >$10
+    DELIV_GENERAL: 6       // � Post-flight (any activity) but only if $CPC>10 || $CPM>10
   };
 
   const today = new Date();
@@ -1447,30 +1459,30 @@ function sendEmailSummary() {
 
     // === Your inclusion rules ===
 
-    // 🟨 PERFORMANCE: CTR ≥ 90% & CPM ≥ $10
-    const isPerformance = /🟨\s*PERFORMANCE: CTR ≥ 90% & CPM ≥ \$?10/.test(issues) ||
+    // � PERFORMANCE: CTR �� 90% & CPM �� $10
+    const isPerformance = /�\s*PERFORMANCE: CTR �� 90% & CPM �� \$?10/.test(issues) ||
                           (ctrPct >= 90 && cpm >= 10);
 
-    // 🟩 CPC+CPM Clicks > Impr & CPC > $10  (both metrics, clicks>impr & CPC>10)
-    const isCostBothMetricsClicksGtImpr = /🟩\s*COST: CPC\+CPM Clicks > Impr.*CPC > \$?10/i.test(issues) ||
+    // � CPC+CPM Clicks > Impr & CPC > $10  (both metrics, clicks>impr & CPC>10)
+    const isCostBothMetricsClicksGtImpr = /�\s*COST: CPC\+CPM Clicks > Impr.*CPC > \$?10/i.test(issues) ||
                                           (both && clicksGtImpr && cpc > 10);
 
-    // 🟥 BILLING (tightened to both metrics, clicks>impr & $CPC>10)
-    const isBillingActive   = /🟥\s*BILLING: Active CPC Billing Risk/i.test(issues)   && both && clicksGtImpr && cpc > 10;
-    const isBillingRecent   = /🟥\s*BILLING: Recently Expired CPC Risk/i.test(issues) && both && clicksGtImpr && cpc > 10;
-    const isBillingExpired  = /🟥\s*BILLING: Expired CPC Risk/i.test(issues)          && both && clicksGtImpr && cpc > 10;
+    // � BILLING (tightened to both metrics, clicks>impr & $CPC>10)
+    const isBillingActive   = /�\s*BILLING: Active CPC Billing Risk/i.test(issues)   && both && clicksGtImpr && cpc > 10;
+    const isBillingRecent   = /�\s*BILLING: Recently Expired CPC Risk/i.test(issues) && both && clicksGtImpr && cpc > 10;
+    const isBillingExpired  = /�\s*BILLING: Expired CPC Risk/i.test(issues)          && both && clicksGtImpr && cpc > 10;
 
-    // 🟦 DELIVERY (Post-Flight) inclusions you selected
+    // � DELIVERY (Post-Flight) inclusions you selected
     // 1) Strict: post-flight + both metrics + clicks>impr + $CPC>10
-    const isDelivStrict = /🟦\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && both && clicksGtImpr && cpc > 10;
+    const isDelivStrict = /�\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && both && clicksGtImpr && cpc > 10;
     // 2) CPM-only > $10 (post-flight)
-    const isDelivCpmOnly = /🟦\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && (imp > 0 && clk === 0) && cpm > 10;
+    const isDelivCpmOnly = /�\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && (imp > 0 && clk === 0) && cpm > 10;
     // 3) General: post-flight, include only if $CPC>10 OR $CPM>10
-    const isDelivGeneral = /🟦\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && (cpc > 10 || cpm > 10);
+    const isDelivGeneral = /�\s*DELIVERY: Post-Flight Activity/i.test(issues) && isPostFlight && (cpc > 10 || cpm > 10);
 
-    // ❌ Explicit excludes
-    const isCpcOnly = /🟩\s*COST:\s*CPC\s*Only\s*>\s*\$?10/i.test(issues) || (imp === 0 && clk > 0 && cpc > 10);
-    const isCpmOnly = /🟩\s*COST:\s*CPM\s*Only\s*>\s*\$?10/i.test(issues) || (imp > 0 && clk === 0 && cpm > 10);
+    // �� Explicit excludes
+    const isCpcOnly = /�\s*COST:\s*CPC\s*Only\s*>\s*\$?10/i.test(issues) || (imp === 0 && clk > 0 && cpc > 10);
+    const isCpmOnly = /�\s*COST:\s*CPM\s*Only\s*>\s*\$?10/i.test(issues) || (imp > 0 && clk === 0 && cpm > 10);
     if (isCpcOnly || isCpmOnly) return null;
 
     // decide bucket (highest priority match wins)
@@ -1511,14 +1523,14 @@ function sendEmailSummary() {
   const owners = Object.keys(perOwner).sort((a,b)=> a.toLowerCase().localeCompare(b.toLowerCase()));
   if (!owners.length) return "";
 
-  let html = "<p><b>Immediate Attention — Key Issues (by Owner)</b></p>";
+  let html = "<p><b>Immediate Attention �� Key Issues (by Owner)</b></p>";
   let totalRows = 0;
 
   for (const rep of owners) {
     if (totalRows >= MAX_TOTAL_OWNER_ROWS) break;
     const arr = perOwner[rep];
 
-    // sort: bucket → advertiser A–Z → clicks desc → impressions desc → placement id
+    // sort: bucket �� advertiser A��Z �� clicks desc �� impressions desc �� placement id
     arr.sort(function(a, b){
       if (a.bucket !== b.bucket) return a.bucket - b.bucket;
       const aAdv = String(a.adv||"").toLowerCase(), bAdv = String(b.adv||"").toLowerCase();
@@ -1540,8 +1552,8 @@ function sendEmailSummary() {
 
     for (let i = 0; i < take; i++) {
       const o = arr[i];
-      const campShort = o.camp.length > 40 ? o.camp.substring(0, 40) + "…" : o.camp;
-      const plcShort  = o.plc.length  > 30 ? o.plc.substring(0, 30)  + "…" : o.plc;
+      const campShort = o.camp.length > 40 ? o.camp.substring(0, 40) + "��" : o.camp;
+      const plcShort  = o.plc.length  > 30 ? o.plc.substring(0, 30)  + "��" : o.plc;
       html += "<tr>"
            +  "<td>" + o.adv + "</td>"
            +  "<td>" + campShort + "</td>"
@@ -1576,29 +1588,29 @@ const immediateAttentionHtml = buildImmediateAttentionByOwner_(); // still insid
   }
   const staleHtml =
       "<b>Stale Metrics (this month)</b><ul>"
-    + "<li>Placements with no new impressions since last change (≥ " + thresholdDays + " days): " + staleImp + "</li>"
-    + "<li>Placements with no new clicks since last change (≥ " + thresholdDays + " days): " + staleClk + "</li>"
+    + "<li>Placements with no new impressions since last change (�� " + thresholdDays + " days): " + staleImp + "</li>"
+    + "<li>Placements with no new clicks since last change (�� " + thresholdDays + " days): " + staleClk + "</li>"
     + "</ul>";
 
   // Appendix (optional)
   const violationsAppendixHtml =
       '<p><b>What the Violations tab tracks</b></p>'
     + '<ul>'
-    + '<li><b>🟥 BILLING</b><ul>'
-    + '<li><b>Expired CPC Risk</b> — Ended before this month and clicks &gt; impressions.</li>'
-    + '<li><b>Recently Expired CPC Risk</b> — Ended earlier this month and still clicks &gt; impressions.</li>'
-    + '<li><b>Active CPC Billing Risk</b> — Active (report date ≤ end date), clicks &gt; impressions, and $CPC &gt; $10.</li>'
+    + '<li><b>� BILLING</b><ul>'
+    + '<li><b>Expired CPC Risk</b> �� Ended before this month and clicks &gt; impressions.</li>'
+    + '<li><b>Recently Expired CPC Risk</b> �� Ended earlier this month and still clicks &gt; impressions.</li>'
+    + '<li><b>Active CPC Billing Risk</b> �� Active (report date �� end date), clicks &gt; impressions, and $CPC &gt; $10.</li>'
     + '</ul></li>'
-    + '<li><b>🟦 DELIVERY</b><ul>'
-    + '<li><b>Post-Flight Activity</b> — Ended before this month but shows impressions or clicks this month.</li>'
+    + '<li><b>� DELIVERY</b><ul>'
+    + '<li><b>Post-Flight Activity</b> �� Ended before this month but shows impressions or clicks this month.</li>'
     + '</ul></li>'
-    + '<li><b>🟨 PERFORMANCE</b><ul>'
-    + '<li><b>CTR ≥ 90% &amp; CPM ≥ $10</b> — Extreme CTR with meaningful CPM spend.</li>'
+    + '<li><b>� PERFORMANCE</b><ul>'
+    + '<li><b>CTR �� 90% &amp; CPM �� $10</b> �� Extreme CTR with meaningful CPM spend.</li>'
     + '</ul></li>'
-    + '<li><b>🟩 COST</b><ul>'
-    + '<li><b>CPC Only &gt; $10</b> — No CPM spend and $CPC &gt; $10.</li>'
-    + '<li><b>CPM Only &gt; $10</b> — No CPC spend and $CPM &gt; $10.</li>'
-    + '<li><b>CPC+CPM Clicks &gt; Impr &amp; CPC &gt; $10</b> — Both CPC &amp; CPM, clicks &gt; impressions, and $CPC &gt; $10.</li>'
+    + '<li><b>� COST</b><ul>'
+    + '<li><b>CPC Only &gt; $10</b> �� No CPM spend and $CPC &gt; $10.</li>'
+    + '<li><b>CPM Only &gt; $10</b> �� No CPC spend and $CPM &gt; $10.</li>'
+    + '<li><b>CPC+CPM Clicks &gt; Impr &amp; CPC &gt; $10</b> �� Both CPC &amp; CPM, clicks &gt; impressions, and $CPC &gt; $10.</li>'
     + '<li><i>(Low Priority tags exist in attachment but are excluded from this section)</i></li>'
     + '</ul></li>'
     + '</ul>';
@@ -1609,7 +1621,7 @@ const immediateAttentionHtml = buildImmediateAttentionByOwner_(); // still insid
   const xlsxBlob = createXLSXFromSheet(sheet).setName(fileName);
 
   // Assemble body
-  const subject = "!!!TESTING VS CODE VERSION!!!!!CM360 CPC/CPM FLIGHT QA – " + todayformatted;
+  const subject = "!!!TESTING VS CODE VERSION!!!!!CM360 CPC/CPM FLIGHT QA �� " + todayformatted;
   let htmlBody =
       networkSummary
     + '<p>The below is a table of the following Billing, Delivery, Performance and Cost issues:</p>'
@@ -1622,7 +1634,7 @@ const immediateAttentionHtml = buildImmediateAttentionByOwner_(); // still insid
   // Safety trim if needed
   if (htmlBody.length > MAX_HTML_CHARS) {
     htmlBody = htmlBody.slice(0, MAX_HTML_CHARS - 1200)
-             + '<p><i>(trimmed for size — full detail in the attached XLSX)</i></p>';
+             + '<p><i>(trimmed for size �� full detail in the attached XLSX)</i></p>';
   }
 
   // Send
@@ -1648,7 +1660,7 @@ function fmtMs_(ms) {
 
 function logStep_(label, fn, runStartMs, quotaMinutes) {
   var stepStart = Date.now();
-  Logger.log('▶ ' + label + ' — START @ ' + new Date(stepStart).toISOString());
+  Logger.log('�� ' + label + ' �� START @ ' + new Date(stepStart).toISOString());
   try {
     var out = fn();
     SpreadsheetApp.flush();
@@ -1657,27 +1669,27 @@ function logStep_(label, fn, runStartMs, quotaMinutes) {
     var quotaMs = (quotaMinutes || 6) * 60 * 1000;
     var leftMs = quotaMs - totalMs;
 
-    Logger.log('✅ ' + label + ' — DONE in ' + fmtMs_(stepMs)
+    Logger.log('� ' + label + ' �� DONE in ' + fmtMs_(stepMs)
       + ' (since run start: ' + fmtMs_(totalMs)
       + ', est. time left: ' + fmtMs_(leftMs) + ')');
 
     if (leftMs <= 60000) {
-      Logger.log('⏳ WARNING: ~' + Math.max(0, Math.floor(leftMs/1000)) + 's left in Apps Script quota window.');
+      Logger.log('�� WARNING: ~' + Math.max(0, Math.floor(leftMs/1000)) + 's left in Apps Script quota window.');
     }
     return out;
   } catch (e) {
-    Logger.log('❌ ' + label + ' — ERROR: ' + (e && e.stack ? e.stack : e));
+    Logger.log('�� ' + label + ' �� ERROR: ' + (e && e.stack ? e.stack : e));
     throw e;
   }
 }
 
 // ---------------------
-// runItAll (with execution logging per step) — MANUAL USE
+// runItAll (with execution logging per step) �� MANUAL USE
 // ---------------------
 function runItAll() {
   var APPROX_QUOTA_MINUTES = 6; // leave at 6 unless your domain truly has more
   var runStart = Date.now();
-  Logger.log('🚀 runItAll — START @ ' + new Date(runStart).toISOString()
+  Logger.log('� runItAll �� START @ ' + new Date(runStart).toISOString()
              + ' (approx quota: ' + APPROX_QUOTA_MINUTES + ' min)');
 
   try {
@@ -1691,7 +1703,7 @@ function runItAll() {
     var timeLeft = Math.max(0, quotaMs - totalMs);
 
     if (timeLeft < 2 * 60 * 1000) {
-      Logger.log('⏭ Not enough time left for QA (' + Math.floor(timeLeft/1000) + 's). Scheduling QA handoff.');
+      Logger.log('�� Not enough time left for QA (' + Math.floor(timeLeft/1000) + 's). Scheduling QA handoff.');
       clearQAState_();           // ensure a fresh QA session
       cancelQAChunkTrigger_();   // clear any stale chunk trigger
       scheduleNextQAChunk_(1);   // kick off the first QA chunk shortly
@@ -1706,7 +1718,7 @@ function runItAll() {
     logStep_('sendEmailSummary',                 function(){ sendEmailSummary();                 }, runStart, APPROX_QUOTA_MINUTES);
   } finally {
     var totalMs = Date.now() - runStart;
-    Logger.log('🏁 runItAll — FINISHED in ' + fmtMs_(totalMs));
+    Logger.log('🏁 runItAll �� FINISHED in ' + fmtMs_(totalMs));
   }
 }
 
@@ -1716,7 +1728,7 @@ function runItAll() {
 function runItAllMorning() {
   var APPROX_QUOTA_MINUTES = 6; // same budget, but we stop before email
   var runStart = Date.now();
-  Logger.log('🚀 runItAllMorning — START @ ' + new Date(runStart).toISOString()
+  Logger.log('� runItAllMorning �� START @ ' + new Date(runStart).toISOString()
              + ' (approx quota: ' + APPROX_QUOTA_MINUTES + ' min)');
 
   try {
@@ -1730,7 +1742,7 @@ function runItAllMorning() {
     var timeLeft = Math.max(0, quotaMs - totalMs);
 
     if (timeLeft < 2 * 60 * 1000) {
-      Logger.log('⏭ Not enough time left for QA (' + Math.floor(timeLeft/1000) + 's). Scheduling QA handoff.');
+      Logger.log('�� Not enough time left for QA (' + Math.floor(timeLeft/1000) + 's). Scheduling QA handoff.');
       clearQAState_();           // ensure a fresh QA session
       cancelQAChunkTrigger_();   // clear any stale chunk trigger
       scheduleNextQAChunk_(1);   // kick off the first QA chunk shortly
@@ -1743,10 +1755,10 @@ function runItAllMorning() {
     // 4) Performance spike alert (fast; safe to keep here)
     logStep_('sendPerformanceSpikeAlertIfPre15', function(){ sendPerformanceSpikeAlertIfPre15(); }, runStart, APPROX_QUOTA_MINUTES);
 
-    // ❌ NO sendEmailSummary here — that gets its own trigger/window
+    // �� NO sendEmailSummary here �� that gets its own trigger/window
   } finally {
     var totalMs = Date.now() - runStart;
-    Logger.log('🏁 runItAllMorning — FINISHED in ' + fmtMs_(totalMs));
+    Logger.log('🏁 runItAllMorning �� FINISHED in ' + fmtMs_(totalMs));
   }
 }
 
@@ -1756,7 +1768,7 @@ function runItAllMorning() {
 function runDailyEmailSummary() {
   var APPROX_QUOTA_MINUTES = 6;
   var runStart = Date.now();
-  Logger.log('🚀 runDailyEmailSummary — START @ ' + new Date(runStart).toISOString()
+  Logger.log('� runDailyEmailSummary �� START @ ' + new Date(runStart).toISOString()
              + ' (approx quota: ' + APPROX_QUOTA_MINUTES + ' min)');
 
   try {
@@ -1766,7 +1778,7 @@ function runDailyEmailSummary() {
     logStep_('sendEmailSummary', function(){ sendEmailSummary(); }, runStart, APPROX_QUOTA_MINUTES);
   } finally {
     var totalMs = Date.now() - runStart;
-    Logger.log('🏁 runDailyEmailSummary — FINISHED in ' + fmtMs_(totalMs));
+    Logger.log('🏁 runDailyEmailSummary �� FINISHED in ' + fmtMs_(totalMs));
   }
 }
 
@@ -1811,8 +1823,8 @@ function trimAllSheetsToData_() {
 //          Google Drive archiving, and month-over-month analysis
 //
 // Features:
-// - Priority-based scoring (⭐⭐⭐ / ⭐⭐ / ⭐)
-// - Status badges (🔴 URGENT | 🟡 REVIEW | 🟢 MONITOR)
+// - Priority-based scoring (������ / ���� / ��)
+// - Status badges (🔴 URGENT | � REVIEW | � MONITOR)
 // - Financial impact calculation ($ At Risk)
 // - Google Drive monthly archiving
 // - Month-over-month trend analysis
@@ -1911,9 +1923,9 @@ function generateViolationsV2Dashboard() {
     v2Sheet.setFrozenColumns(3);
     
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    Logger.log(`[V2] ✅ Dashboard generated with ${v2Data.length - 1} rows in ${elapsed}s`);
+    Logger.log(`[V2] � Dashboard generated with ${v2Data.length - 1} rows in ${elapsed}s`);
     
-    SpreadsheetApp.getUi().alert(`✅ V2 Dashboard generated!\n\n${v2Data.length - 1} violations processed\nTime: ${elapsed}s`);
+    SpreadsheetApp.getUi().alert(`� V2 Dashboard generated!\n\n${v2Data.length - 1} violations processed\nTime: ${elapsed}s`);
   } else {
     SpreadsheetApp.getUi().alert("No violations to display in V2 dashboard.");
   }
@@ -1979,8 +1991,8 @@ function transformToV2Row_(row, vMap, networkNameMap) {
   }
   
   return [
-    priority,           // Priority (⭐⭐⭐ / ⭐⭐ / ⭐)
-    status,             // Status (🔴/🟡/🟢)
+    priority,           // Priority (������ / ���� / ��)
+    status,             // Status (🔴/�/�)
     ownerOps,           // Owner (Ops)
     networkId,          // Network ID
     networkName,        // Network Name
@@ -2185,7 +2197,7 @@ function calculateSeverityScore_(issueType, imp, clk, cpc, cpm, placementEnd, re
   // 4 = HIGH: Active billing risk
   if (types.includes("ACTIVE CPC") && clk > imp) return 4;
   
-  // 4 = HIGH: Extreme performance (CTR ≥ 90% + CPM ≥ $10)
+  // 4 = HIGH: Extreme performance (CTR �� 90% + CPM �� $10)
   if (types.includes("PERFORMANCE") && cpm >= 10) return 4;
   
   // 3 = MEDIUM: Recently expired with activity
@@ -2205,9 +2217,9 @@ function calculateSeverityScore_(issueType, imp, clk, cpc, cpm, placementEnd, re
 // HELPER: Calculate Priority
 // ---------------------
 function calculatePriority_(severity, category) {
-  if (severity >= 4) return "⭐⭐⭐";
-  if (severity === 3) return "⭐⭐";
-  return "⭐";
+  if (severity >= 4) return "������";
+  if (severity === 3) return "����";
+  return "��";
 }
 
 // ---------------------
@@ -2219,17 +2231,17 @@ function calculateStatus_(priority, severity, category, cpc, placementEnd, repor
   const isExpired = !isNaN(end) && end < report;
   
   // 🔴 URGENT: High priority + severe conditions
-  if (priority === "⭐⭐⭐" && (category === "BILLING" || cpc > 20 || (isExpired && severity >= 4))) {
+  if (priority === "������" && (category === "BILLING" || cpc > 20 || (isExpired && severity >= 4))) {
     return "🔴 URGENT";
   }
   
-  // 🟡 REVIEW: Medium priority or specific categories
-  if (priority === "⭐⭐" || category === "PERFORMANCE" || category === "DELIVERY") {
-    return "🟡 REVIEW";
+  // � REVIEW: Medium priority or specific categories
+  if (priority === "����" || category === "PERFORMANCE" || category === "DELIVERY") {
+    return "� REVIEW";
   }
   
-  // 🟢 MONITOR: Everything else
-  return "🟢 MONITOR";
+  // � MONITOR: Everything else
+  return "� MONITOR";
 }
 
 // ---------------------
@@ -2272,7 +2284,7 @@ function formatSpecificIssue_(issueType, details, imp, clk, cpc, cpm) {
   
   // Fallback: use first detail snippet
   const detailParts = details.split(" | ");
-  return detailParts[0] || primary.replace(/🟥|🟨|🟩|🟦/g, "").trim();
+  return detailParts[0] || primary.replace(/�|�|�|�/g, "").trim();
 }
 
 // ---------------------
@@ -2302,7 +2314,7 @@ function calculateFinancialImpact_(issueType, imp, clk, cpc, cpm, placementEnd, 
     atRisk += billingCalc.overcharge;
   }
   
-  // PERFORMANCE WASTE: Potential bot traffic (CTR ≥ 90% + high CPM)
+  // PERFORMANCE WASTE: Potential bot traffic (CTR �� 90% + high CPM)
   if (types.includes("PERFORMANCE") && cpm >= 10) {
     // Estimate 50% of impressions as potential waste
     atRisk += (imp * 0.5) * (cpm / 1000);
@@ -2382,12 +2394,12 @@ function applyV2ConditionalFormatting_(sheet) {
   // Priority column (A) - Background colors
   const priorityRules = [
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo("⭐⭐⭐")
+      .whenTextEqualTo("������")
       .setBackground(V2_COLORS.PRIORITY_HIGH)
       .setRanges([sheet.getRange(2, 1, lastRow - 1, 1)])
       .build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo("⭐⭐")
+      .whenTextEqualTo("����")
       .setBackground(V2_COLORS.PRIORITY_MED)
       .setRanges([sheet.getRange(2, 1, lastRow - 1, 1)])
       .build()
@@ -2402,13 +2414,13 @@ function applyV2ConditionalFormatting_(sheet) {
       .setRanges([sheet.getRange(2, 2, lastRow - 1, 1)])
       .build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains("🟡 REVIEW")
+      .whenTextContains("� REVIEW")
       .setBackground(V2_COLORS.REVIEW_BG)
       .setFontColor(V2_COLORS.REVIEW_TEXT)
       .setRanges([sheet.getRange(2, 2, lastRow - 1, 1)])
       .build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains("🟢 MONITOR")
+      .whenTextContains("� MONITOR")
       .setBackground(V2_COLORS.MONITOR_BG)
       .setFontColor(V2_COLORS.MONITOR_TEXT)
       .setRanges([sheet.getRange(2, 2, lastRow - 1, 1)])
@@ -2513,14 +2525,14 @@ function exportV2ToDrive() {
     const file = monthFolder.createFile(xlsxBlob);
     const fileUrl = file.getUrl();
     
-    Logger.log(`[V2] ✅ Exported to Drive: ${fileUrl}`);
-    SpreadsheetApp.getUi().alert(`✅ V2 Dashboard exported to Google Drive!\n\nFile: ${fileName}\nFolder: ${monthFolderName}\n\nURL: ${fileUrl}`);
+    Logger.log(`[V2] � Exported to Drive: ${fileUrl}`);
+    SpreadsheetApp.getUi().alert(`� V2 Dashboard exported to Google Drive!\n\nFile: ${fileName}\nFolder: ${monthFolderName}\n\nURL: ${fileUrl}`);
     
     return fileUrl;
     
   } catch (error) {
-    Logger.log("[V2] ❌ Export failed: " + error);
-    SpreadsheetApp.getUi().alert("❌ Export failed:\n\n" + error);
+    Logger.log("[V2] �� Export failed: " + error);
+    SpreadsheetApp.getUi().alert("�� Export failed:\n\n" + error);
     return null;
   }
 }
@@ -2565,8 +2577,8 @@ function generateMonthlySummaryReport() {
     const overcharge = parseFloat(overchargeStr.replace("$", "")) || 0;
     
     if (status.includes("🔴")) urgentCount++;
-    else if (status.includes("🟡")) reviewCount++;
-    else if (status.includes("🟢")) monitorCount++;
+    else if (status.includes("�")) reviewCount++;
+    else if (status.includes("�")) monitorCount++;
     
     totalAtRisk += overcharge; // Use overcharge instead of old "$ At Risk"
     
@@ -2595,8 +2607,8 @@ function generateMonthlySummaryReport() {
     ["📊 OVERVIEW"],
     ["Total Violations:", totalViolations],
     ["🔴 Urgent:", urgentCount],
-    ["🟡 Review:", reviewCount],
-    ["🟢 Monitor:", monitorCount],
+    ["� Review:", reviewCount],
+    ["� Monitor:", monitorCount],
     ["💰 Total $ At Risk:", "$" + totalAtRisk.toFixed(2)],
     [""],
     ["📂 BY CATEGORY"],
@@ -2614,9 +2626,9 @@ function generateMonthlySummaryReport() {
   });
   
   summaryData.push([""]);
-  summaryData.push(["⚡ BY SEVERITY"]);
+  summaryData.push(["�� BY SEVERITY"]);
   for (let i = 5; i >= 1; i--) {
-    const stars = i >= 4 ? "⭐⭐⭐" : i === 3 ? "⭐⭐" : "⭐";
+    const stars = i >= 4 ? "������" : i === 3 ? "����" : "��";
     summaryData.push([`${i} - ${stars}`, severityBreakdown[i]]);
   }
   
@@ -2628,8 +2640,8 @@ function generateMonthlySummaryReport() {
   summarySheet.setColumnWidth(1, 200);
   summarySheet.setColumnWidth(2, 150);
   
-  Logger.log("[V2] ✅ Monthly summary generated");
-  SpreadsheetApp.getUi().alert(`✅ Monthly Summary Report Generated!\n\nTotal Violations: ${totalViolations}\n🔴 Urgent: ${urgentCount}\n💰 At Risk: $${totalAtRisk.toFixed(2)}`);
+  Logger.log("[V2] � Monthly summary generated");
+  SpreadsheetApp.getUi().alert(`� Monthly Summary Report Generated!\n\nTotal Violations: ${totalViolations}\n🔴 Urgent: ${urgentCount}\n💰 At Risk: $${totalAtRisk.toFixed(2)}`);
 }
 
 // ---------------------
@@ -2686,9 +2698,9 @@ function displayFinancialImpact() {
   const message = `💰 FINANCIAL IMPACT ANALYSIS\n\n` +
     `Total Overcharge (Billing Risk): $${totalOvercharge.toFixed(2)}\n\n` +
     `Breakdown:\n` +
-    `  • Billing Overcharge: $${billingRisk.toFixed(2)}\n` +
-    `  • Performance Waste: $${performanceWaste.toFixed(2)}\n` +
-    `  • Post-Flight Spend: $${postFlightSpend.toFixed(2)}\n\n` +
+    `  �� Billing Overcharge: $${billingRisk.toFixed(2)}\n` +
+    `  �� Performance Waste: $${performanceWaste.toFixed(2)}\n` +
+    `  �� Post-Flight Spend: $${postFlightSpend.toFixed(2)}\n\n` +
     `Note: Billing Overcharge shows the dual billing impact where\n` +
     `Google charges CPM for impressions + CPC for excess clicks.\n\n` +
     `This represents potential savings from catching and resolving these violations.`;
@@ -2722,7 +2734,7 @@ function archiveAllHistoricalReports() {
   const response = ui.alert(
     'Archive Historical Reports',
     'This will process all CM360 QA reports from April-November 2025.\n\n' +
-    'Expected: ~128 emails (8 months × 16 days)\n' +
+    'Expected: ~128 emails (8 months � 16 days)\n' +
     'Processing: 25 emails per run\n' +
     'You will receive email updates after each batch.\n\n' +
     'Continue?',
@@ -2883,7 +2895,7 @@ function processNextBatch_() {
     // Send completion email
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '✅ CM360 Historical Archive Complete',
+      subject: '� CM360 Historical Archive Complete',
       htmlBody: `<h3>Archive Complete</h3>
         <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
         <p><strong>Total attachments saved:</strong> ${state.attachmentsSaved}</p>
@@ -2925,7 +2937,7 @@ function processNextBatch_() {
     // Send error email
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '⚠️ CM360 Archive Error',
+      subject: '��️ CM360 Archive Error',
       htmlBody: `<h3>Archive Error</h3>
         <p><strong>Month:</strong> ${getMonthName_(state.currentMonth)} ${state.currentYear}</p>
         <p><strong>Error:</strong> ${error}</p>
@@ -3261,7 +3273,7 @@ function emailDetailedProgressReport() {
       </tr>
     </table>
     
-    <h3>⏱️ Timing</h3>
+    <h3>��️ Timing</h3>
     <table style="border-collapse: collapse; width: 100%;">
       <tr style="background-color: #f0f0f0;">
         <td style="padding: 8px; border: 1px solid #ddd;"><strong>Started</strong></td>
@@ -3547,9 +3559,9 @@ function sendDailyProgressReport() {
   if (state.status === 'completed') {
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '✅ CM360 Archive COMPLETE - Daily Report Trigger Stopping',
+      subject: '� CM360 Archive COMPLETE - Daily Report Trigger Stopping',
       htmlBody: `
-        <h2 style="color: #00cc00;">✅ Archive Complete!</h2>
+        <h2 style="color: #00cc00;">� Archive Complete!</h2>
         <p>The raw data archive has finished successfully.</p>
         <p><strong>Total emails processed:</strong> ${state.emailsProcessed}</p>
         <p><strong>Total files saved:</strong> ${state.filesSaved}</p>
@@ -3663,7 +3675,7 @@ function processNextRawDataBatch_() {
       // Auto-delete trigger
       deleteRawDataAutoResumeTrigger();
       
-      Logger.log('✅ Raw data archive complete!');
+      Logger.log('� Raw data archive complete!');
       return;
     }
     
@@ -3775,7 +3787,7 @@ function processNextRawDataBatch_() {
     
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '⚠️ CM360 Raw Data Archive Error',
+      subject: '��️ CM360 Raw Data Archive Error',
       htmlBody: `<h3>Raw Data Archive Error</h3>
         <p><strong>Error:</strong> ${error}</p>
         <p><strong>Progress:</strong> ${state ? state.emailsProcessed : 'unknown'} emails, ${state ? state.filesSaved : 'unknown'} files saved</p>
@@ -3800,9 +3812,9 @@ function sendRawDataCompletionEmail_(state) {
   
   MailApp.sendEmail({
     to: 'platformsolutionsadopshorizon@gmail.com',
-    subject: '✅ CM360 Raw Data Archive Complete - Full Inbox Archived',
+    subject: '� CM360 Raw Data Archive Complete - Full Inbox Archived',
     htmlBody: `
-      <h2 style="color: #0066cc;">✅ CM360 Raw Data Archive Complete</h2>
+      <h2 style="color: #0066cc;">� CM360 Raw Data Archive Complete</h2>
       
       <h3>📊 Overall Statistics</h3>
       <table style="border-collapse: collapse; width: 100%;">
@@ -3820,7 +3832,7 @@ function sendRawDataCompletionEmail_(state) {
         </tr>
       </table>
       
-      <h3>⏱️ Performance</h3>
+      <h3>��️ Performance</h3>
       <table style="border-collapse: collapse; width: 100%;">
         <tr style="background-color: #f0f0f0;">
           <td style="padding: 8px; border: 1px solid #ddd;"><strong>Start Time</strong></td>
@@ -3849,7 +3861,7 @@ function sendRawDataCompletionEmail_(state) {
       </ol>
       
       <hr style="border: 1px solid #ddd; margin: 20px 0;">
-      <p style="color: #34a853; font-size: 12px;">✅ Archive checked for new emails that arrived during processing - all caught up!</p>
+      <p style="color: #34a853; font-size: 12px;">� Archive checked for new emails that arrived during processing - all caught up!</p>
       <p style="color: #666; font-size: 12px;">Auto-resume trigger has been automatically deleted. Archive state saved in Script Properties.</p>
     `
   });
@@ -4008,9 +4020,9 @@ function categorizeRawDataByNetwork() {
     // Send detailed completion email
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '✅ CM360 Raw Data Categorization Complete - Summary Report',
+      subject: '� CM360 Raw Data Categorization Complete - Summary Report',
       htmlBody: `
-        <h2 style="color: #0066cc;">✅ File Categorization Complete</h2>
+        <h2 style="color: #0066cc;">� File Categorization Complete</h2>
         
         <h3>📊 Overall Statistics</h3>
         <table style="border-collapse: collapse; width: 100%;">
@@ -4036,7 +4048,7 @@ function categorizeRawDataByNetwork() {
           </tr>
         </table>
         
-        <h3>⏱️ Performance</h3>
+        <h3>��️ Performance</h3>
         <table style="border-collapse: collapse; width: 100%;">
           <tr style="background-color: #f0f0f0;">
             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Start Time</strong></td>
@@ -4077,7 +4089,7 @@ function categorizeRawDataByNetwork() {
         
         <h3>📋 Next Steps</h3>
         <ol>
-          <li><strong>Review uncategorized files:</strong> ${stats.filesUncategorized > 0 ? 'Check files without network IDs in filename' : 'None to review! ✅'}</li>
+          <li><strong>Review uncategorized files:</strong> ${stats.filesUncategorized > 0 ? 'Check files without network IDs in filename' : 'None to review! �'}</li>
           <li><strong>Verify network folders:</strong> Spot-check a few networks to confirm proper organization</li>
           <li><strong>Build ROI analysis:</strong> Ready to analyze violations and cost savings per network</li>
         </ol>
@@ -4089,8 +4101,8 @@ function categorizeRawDataByNetwork() {
     
     ui.alert(
       'Categorization Complete',
-      `✅ ${stats.filesCategorized} files organized into ${stats.networksFound} network folders\n` +
-      `⚠️ ${stats.filesUncategorized} files remain uncategorized\n\n` +
+      `� ${stats.filesCategorized} files organized into ${stats.networksFound} network folders\n` +
+      `��️ ${stats.filesUncategorized} files remain uncategorized\n\n` +
       `Duration: ${durationMin} minutes\n\n` +
       'Check your email for detailed statistics.',
       ui.ButtonSet.OK
@@ -4101,7 +4113,7 @@ function categorizeRawDataByNetwork() {
     
     MailApp.sendEmail({
       to: 'platformsolutionsadopshorizon@gmail.com',
-      subject: '⚠️ CM360 Raw Data Categorization Error',
+      subject: '��️ CM360 Raw Data Categorization Error',
       htmlBody: `
         <h3 style="color: #cc0000;">Categorization Error</h3>
         <p><strong>Error:</strong> ${error}</p>
@@ -4181,7 +4193,7 @@ function categorizeAllFiles_(networkMap) {
             const movedFile = file.moveTo(networkDateFolder);
             if (newFilename !== filename) {
               movedFile.setName(newFilename);
-              Logger.log(`Renamed and moved: ${filename} → ${newFilename}`);
+              Logger.log(`Renamed and moved: ${filename} �� ${newFilename}`);
             }
             
             filesCategorized++;
@@ -4193,7 +4205,7 @@ function categorizeAllFiles_(networkMap) {
             }
             networkFileCounts[networkId].count++;
             
-            Logger.log(`Categorized: ${newFilename} → ${networkId} - ${networkName}/${dateStr}`);
+            Logger.log(`Categorized: ${newFilename} �� ${networkId} - ${networkName}/${dateStr}`);
           } else {
             filesUncategorized++;
             Logger.log(`Uncategorized: ${filename}`);
@@ -4333,7 +4345,7 @@ function auditRawDataArchiveComprehensive() {
   const existingState = props.getProperty(stateKey);
   if (existingState) {
     const response = ui.alert(
-      '⏸️ Audit In Progress',
+      '��️ Audit In Progress',
       'An audit is already running.\n\n' +
       'Continue from where it left off?',
       ui.ButtonSet.YES_NO
@@ -4377,10 +4389,10 @@ function auditRawDataArchiveComprehensive() {
   props.setProperty(stateKey, JSON.stringify(state));
   
   ui.alert(
-    '✅ Audit Started',
+    '� Audit Started',
     'Phase 1: Scanning Gmail\n\n' +
     'Create an auto-resume trigger to continue automatically every 10 minutes.\n\n' +
-    'Menu → ARCHIVE TOOLS → Create Auto-Resume Trigger',
+    'Menu �� ARCHIVE TOOLS �� Create Auto-Resume Trigger',
     ui.ButtonSet.OK
   );
   
@@ -4495,7 +4507,7 @@ function processComprehensiveAuditBatch_() {
       // Clean up state
       props.deleteProperty(stateKey);
       
-      Logger.log('✅ Comprehensive audit complete and email sent');
+      Logger.log('� Comprehensive audit complete and email sent');
     }
     
   } catch (error) {
@@ -4504,7 +4516,7 @@ function processComprehensiveAuditBatch_() {
     // Send error email
     MailApp.sendEmail({
       to: Session.getActiveUser().getEmail(),
-      subject: '❌ Comprehensive Audit Error',
+      subject: '�� Comprehensive Audit Error',
       body: `Error in ${state.phase} phase: ${error.toString()}\n\nProgress saved. Run again to resume.`
     });
   }
@@ -4600,7 +4612,7 @@ function resetComprehensiveAudit() {
   props.deleteProperty('comprehensive_audit_state');
   
   SpreadsheetApp.getUi().alert(
-    '✅ Audit Reset',
+    '� Audit Reset',
     'Comprehensive audit state has been cleared.\n\nYou can start a new audit from the menu.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
@@ -4617,7 +4629,7 @@ function viewComprehensiveAuditProgress() {
   
   if (!stateJson) {
     SpreadsheetApp.getUi().alert(
-      'ℹ️ No Audit In Progress',
+      '��️ No Audit In Progress',
       'There is no comprehensive audit currently running.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
@@ -4883,7 +4895,7 @@ function sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missing
   // Missing date/networks section
   if (missingDateNetworks.length > 0) {
     htmlBody += `
-      <h3>❌ Missing Date/Networks (In Gmail, Not in Drive)</h3>
+      <h3>�� Missing Date/Networks (In Gmail, Not in Drive)</h3>
       <p>These dates have emails but no files saved in Drive:</p>
       <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 12px;">
         <thead>
@@ -4919,7 +4931,7 @@ function sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missing
   // Extra date/networks section
   if (extraDateNetworks.length > 0) {
     htmlBody += `
-      <h3>➕ Extra Date/Networks (In Drive, Not in Gmail)</h3>
+      <h3>�� Extra Date/Networks (In Drive, Not in Gmail)</h3>
       <p>These dates have files in Drive but no corresponding emails:</p>
       <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 12px;">
         <thead>
@@ -4955,7 +4967,7 @@ function sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missing
   // Count mismatches section
   if (countMismatches.length > 0) {
     htmlBody += `
-      <h3>⚠️ File Count Mismatches</h3>
+      <h3>��️ File Count Mismatches</h3>
       <p>These date/networks exist in both Gmail and Drive but have different file counts:</p>
       <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 12px;">
         <thead>
@@ -4997,14 +5009,14 @@ function sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missing
   if (!hasIssues) {
     htmlBody += `
       <div style="background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; padding: 15px; margin-top: 20px;">
-        <h3 style="color: #155724; margin: 0;">✅ Archive is Complete!</h3>
+        <h3 style="color: #155724; margin: 0;">� Archive is Complete!</h3>
         <p style="margin: 10px 0 0 0;">All Gmail attachments are properly saved in Drive with matching counts.</p>
       </div>
     `;
   } else {
     htmlBody += `
       <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px; margin-top: 20px;">
-        <h3 style="color: #856404; margin: 0;">⚠️ Action Required</h3>
+        <h3 style="color: #856404; margin: 0;">��️ Action Required</h3>
         <p style="margin: 10px 0 0 0;">Please review the issues above and use the gap-fill archive tool to correct missing data.</p>
       </div>
     `;
@@ -5015,8 +5027,8 @@ function sendComprehensiveAuditReportCounts_(totalExpected, totalActual, missing
   `;
   
   const subject = hasIssues 
-    ? '⚠️ Comprehensive Archive Audit Complete (Issues Found)'
-    : '✅ Comprehensive Archive Audit Complete';
+    ? '��️ Comprehensive Archive Audit Complete (Issues Found)'
+    : '� Comprehensive Archive Audit Complete';
   
   MailApp.sendEmail({
     to: Session.getActiveUser().getEmail(),
@@ -5079,7 +5091,7 @@ function sendComprehensiveAuditReport_(expectedCount, actualCount, missingFiles,
   // Missing files section
   if (missingFiles.length > 0) {
     htmlBody += `
-      <h3>⚠️ Missing Files (In Gmail, Not in Drive)</h3>
+      <h3>��️ Missing Files (In Gmail, Not in Drive)</h3>
       <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
         <tr style="background-color: #f0f0f0;">
           <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
@@ -5113,13 +5125,13 @@ function sendComprehensiveAuditReport_(expectedCount, actualCount, missingFiles,
     
     htmlBody += '</table>';
   } else {
-    htmlBody += '<p style="color: green;">✅ No missing files! All Gmail attachments are in Drive.</p>';
+    htmlBody += '<p style="color: green;">� No missing files! All Gmail attachments are in Drive.</p>';
   }
   
   // Extra files section
   if (extraFiles.length > 0) {
     htmlBody += `
-      <h3>ℹ️ Extra Files (In Drive, Not in Gmail)</h3>
+      <h3>��️ Extra Files (In Drive, Not in Gmail)</h3>
       <p style="color: #856404; background-color: #fff3cd; padding: 10px; border-radius: 4px;">
         These files exist in Drive but were not found in Gmail. This could be due to:
         <ul>
@@ -5183,7 +5195,7 @@ function sendComprehensiveAuditReport_(expectedCount, actualCount, missingFiles,
 
 /**
  * AUDIT FUNCTION: Validates archive completeness by checking for missing files
- * Compares expected files (Networks × Date Range) vs actual files in Drive
+ * Compares expected files (Networks � Date Range) vs actual files in Drive
  * Generates detailed report of gaps for manual retrieval
  */
 function auditRawDataArchive() {
@@ -5192,7 +5204,7 @@ function auditRawDataArchive() {
     var response = ui.alert(
       '🔍 Audit Raw Data Archive',
       'This will scan your Drive to identify missing files.\n\n' +
-      'Expected files = All Networks × All Dates in archive period.\n' +
+      'Expected files = All Networks � All Dates in archive period.\n' +
       'This may take several minutes.\n\nProceed?',
       ui.ButtonSet.YES_NO
     );
@@ -5259,7 +5271,7 @@ function auditRawDataArchive() {
     sendAuditReport_(networkMap, expectedFiles.length, foundFiles.length, missingFiles);
     
     ui.alert(
-      '✅ Audit Complete',
+      '� Audit Complete',
       'Found: ' + foundFiles.length + ' files\n' +
       'Missing: ' + missingFiles.length + ' files\n\n' +
       'Detailed report sent to your email.',
@@ -5381,7 +5393,7 @@ function buildExpectedFileList_(rootFolder, networkMap) {
   
   Logger.log('Found ' + dates.size + ' unique dates in Drive');
   
-  // For each date × network, expect a file
+  // For each date � network, expect a file
   var dateArray = Array.from(dates);
   var networkIds = Object.keys(networkMap);
   
@@ -5474,7 +5486,7 @@ function sendAuditReport_(networkMap, expectedCount, foundCount, missingFiles) {
         </table>
         
         ${missingFiles.length > 0 ? `
-        <h3 style="color: #d93025;">⚠️ Missing Files by Network</h3>
+        <h3 style="color: #d93025;">��️ Missing Files by Network</h3>
         <p style="color: #666; font-size: 12px;">Networks sorted by most missing files (showing top 20):</p>
         <table style="border-collapse: collapse; width: 100%; font-size: 12px;">
           <tr style="background-color: #f0f0f0;">
@@ -5517,7 +5529,7 @@ function sendAuditReport_(networkMap, expectedCount, foundCount, missingFiles) {
           <li><strong>Re-audit:</strong> Run this audit again to verify gaps are filled</li>
         </ol>
         ` : `
-        <h3 style="color: #34a853;">✅ Archive Complete!</h3>
+        <h3 style="color: #34a853;">� Archive Complete!</h3>
         <p>All expected files are present in your Drive. No gaps detected.</p>
         <p style="color: #666; font-size: 12px;">Note: This assumes 1 file per network per date. Some networks may legitimately have no data for certain dates.</p>
         `}
@@ -5562,8 +5574,8 @@ function archiveRawDataGapFill() {
     'This will archive ONLY the missing dates from May 1 to today.\n\n' +
     'Based on your existing data, you have ~90 missing dates.\n\n' +
     'Estimated:\n' +
-    '• ~1,620 emails to process\n' +
-    '• ~2-3 hours duration\n\n' +
+    '�� ~1,620 emails to process\n' +
+    '�� ~2-3 hours duration\n\n' +
     'The system will skip dates that already have data.\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO
@@ -5577,7 +5589,7 @@ function archiveRawDataGapFill() {
   const allDates = generateDateRange_(new Date(2025, 4, 1), new Date()); // May is month 4 (0-indexed)
   
   ui.alert(
-    '✅ Ready to Start',
+    '� Ready to Start',
     `Will check ${allDates.length} dates from May 1 to today.\n\n` +
     'Dates that already have files will be skipped automatically.\n\n' +
     'Click OK to start.',
@@ -5604,7 +5616,7 @@ function archiveRawDataGapFill() {
   processGapFillBatch_();
   
   ui.alert(
-    '✅ Gap-Fill Archive Started',
+    '� Gap-Fill Archive Started',
     `Processing ${allDates.length} dates (will skip existing).\n\n` +
     'Create an Auto-Resume trigger to continue automatically every 10 minutes.',
     ui.ButtonSet.OK
@@ -5684,7 +5696,7 @@ function processGapFillBatch_() {
     // Send completion email
     sendGapFillCompletionEmail_(state);
     
-    Logger.log('✅ Gap-fill archive COMPLETED!');
+    Logger.log('� Gap-fill archive COMPLETED!');
   } else {
     const progress = ((state.currentDateIndex/state.allDates.length)*100).toFixed(1);
     Logger.log(`Progress: ${state.currentDateIndex}/${state.allDates.length} dates checked (${progress}%) - ${state.datesCompleted} archived, ${state.datesSkipped} skipped`);
@@ -5911,7 +5923,7 @@ function sendGapFillCompletionEmail_(state) {
   
   MailApp.sendEmail({
     to: 'platformsolutionsadopshorizon@gmail.com',
-    subject: '✅ CM360 Gap-Fill Archive COMPLETED',
+    subject: '� CM360 Gap-Fill Archive COMPLETED',
     htmlBody: `
       <h2>🎉 Gap-Fill Archive Complete!</h2>
       
@@ -5923,7 +5935,7 @@ function sendGapFillCompletionEmail_(state) {
         <li><strong>Duration:</strong> ${hours}h ${minutes}m</li>
       </ul>
       
-      <h3>✅ Next Steps</h3>
+      <h3>� Next Steps</h3>
       <ol>
         <li>Delete Auto-Resume trigger (if created)</li>
         <li>Run audit to verify all dates present</li>
@@ -6015,8 +6027,8 @@ function checkDriveRawDataFolder() {
     
     // Summary
     Logger.log('\n=== SUMMARY ===');
-    Logger.log('✅ Total Files: ' + totalFiles);
-    Logger.log('✅ Total Days with Data: ' + totalDays);
+    Logger.log('� Total Files: ' + totalFiles);
+    Logger.log('� Total Days with Data: ' + totalDays);
     
     // Detailed breakdown
     Logger.log('\n=== DETAILED BREAKDOWN ===');
@@ -6033,9 +6045,9 @@ function checkDriveRawDataFolder() {
     // Recommendation
     Logger.log('\n=== RECOMMENDATION ===');
     if (totalFiles > 0) {
-      Logger.log('✅ You have ' + totalFiles + ' files from ' + totalDays + ' days already archived!');
+      Logger.log('� You have ' + totalFiles + ' files from ' + totalDays + ' days already archived!');
       Logger.log('📋 NEXT STEP: Run audit to identify missing dates');
-      Logger.log('⚡ Then archive ONLY the missing dates (much faster than re-doing everything)');
+      Logger.log('�� Then archive ONLY the missing dates (much faster than re-doing everything)');
     } else {
       Logger.log('📁 Folders exist but empty - need to run full archive');
     }
@@ -6054,7 +6066,7 @@ function checkDriveRawDataFolder() {
     
   } catch (error) {
     Logger.log('Error checking Drive folder: ' + error);
-    SpreadsheetApp.getActiveSpreadsheet().toast('Error: ' + error.message, '❌ Check Failed', 10);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Error: ' + error.message, '�� Check Failed', 10);
   }
 }
 
@@ -6087,7 +6099,7 @@ function setupTimeMachineSheet() {
   
   // Title
   sheet.getRange("A1:C1").merge();
-  sheet.getRange("A1").setValue("⏰ TIME MACHINE - Run QA for Past Dates")
+  sheet.getRange("A1").setValue("�� TIME MACHINE - Run QA for Past Dates")
     .setFontSize(16)
     .setFontWeight("bold")
     .setBackground("#4285f4")
@@ -6155,26 +6167,26 @@ function setupTimeMachineSheet() {
   sheet.getRange("A11").setValue("Files Processed:")
     .setFontWeight("bold")
     .setVerticalAlignment("middle");
-  sheet.getRange("B11").setValue("—")
+  sheet.getRange("B11").setValue("��")
     .setVerticalAlignment("middle");
   
   sheet.getRange("A12").setValue("Placements Checked:")
     .setFontWeight("bold")
     .setVerticalAlignment("middle");
-  sheet.getRange("B12").setValue("—")
+  sheet.getRange("B12").setValue("��")
     .setVerticalAlignment("middle");
   
   sheet.getRange("A13").setValue("Violations Found:")
     .setFontWeight("bold")
     .setVerticalAlignment("middle");
-  sheet.getRange("B13").setValue("—")
+  sheet.getRange("B13").setValue("��")
     .setVerticalAlignment("middle");
   
   sheet.getRange("A14").setValue("Report Saved:")
     .setFontWeight("bold")
     .setVerticalAlignment("middle");
   sheet.getRange("B14:C14").merge();
-  sheet.getRange("B14").setValue("—")
+  sheet.getRange("B14").setValue("��")
     .setVerticalAlignment("middle");
   
   // Instructions section
@@ -6187,7 +6199,7 @@ function setupTimeMachineSheet() {
   
   const instructions = [
     ["1.", "Click on cell B4 and select a date from the date picker"],
-    ["2.", "Go to Menu → Time Machine → Run QA for Selected Date"],
+    ["2.", "Go to Menu �� Time Machine �� Run QA for Selected Date"],
     ["3.", "Wait for processing to complete (may take a few minutes)"],
     ["4.", "Check results above and review Violations sheet"],
     ["5.", "Report will be automatically saved to Drive"]
@@ -6203,10 +6215,10 @@ function setupTimeMachineSheet() {
   sheet.setFrozenRows(2);
   
   SpreadsheetApp.getUi().alert(
-    '✅ Time Machine Ready',
+    '� Time Machine Ready',
     'Time Machine sheet has been set up!\n\n' +
     '1. Click on cell B4 to select a date\n' +
-    '2. Use Menu → Time Machine → Run QA for Selected Date\n\n' +
+    '2. Use Menu �� Time Machine �� Run QA for Selected Date\n\n' +
     'The system will download that day\'s data from Gmail and run full QA analysis.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
@@ -6235,7 +6247,7 @@ function runTimeMachineQA() {
   
   if (!tmSheet) {
     SpreadsheetApp.getUi().alert(
-      '❌ Time Machine Not Found',
+      '�� Time Machine Not Found',
       'Please run "Setup Time Machine Sheet" first from the menu.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
@@ -6248,7 +6260,7 @@ function runTimeMachineQA() {
   
   if (!dateValue || !(dateValue instanceof Date)) {
     SpreadsheetApp.getUi().alert(
-      '❌ No Date Selected',
+      '�� No Date Selected',
       'Please select a date in cell B4 first.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
@@ -6290,7 +6302,7 @@ function runTimeMachineQA() {
     
     if (result.success) {
       // Update status
-      tmSheet.getRange("B6").setValue("✅ Complete - " + dateStr)
+      tmSheet.getRange("B6").setValue("� Complete - " + dateStr)
         .setFontColor("#0f9d58")
         .setFontWeight("bold");
       
@@ -6307,7 +6319,7 @@ function runTimeMachineQA() {
         .setFontStyle("italic");
       
       SpreadsheetApp.getUi().alert(
-        '✅ QA Complete for ' + dateStr,
+        '� QA Complete for ' + dateStr,
         'Processing complete!\n\n' +
         'Files processed: ' + result.filesProcessed + '\n' +
         'Placements checked: ' + result.placementsChecked + '\n' +
@@ -6318,19 +6330,19 @@ function runTimeMachineQA() {
         SpreadsheetApp.getUi().ButtonSet.OK
       );
     } else {
-      tmSheet.getRange("B6").setValue("❌ Error - " + result.error)
+      tmSheet.getRange("B6").setValue("�� Error - " + result.error)
         .setFontColor("#d93025")
         .setFontWeight("bold");
       
-      SpreadsheetApp.getUi().alert('❌ Error', result.error, SpreadsheetApp.getUi().ButtonSet.OK);
+      SpreadsheetApp.getUi().alert('�� Error', result.error, SpreadsheetApp.getUi().ButtonSet.OK);
     }
     
   } catch (error) {
-    tmSheet.getRange("B6").setValue("❌ Error - " + error.toString())
+    tmSheet.getRange("B6").setValue("�� Error - " + error.toString())
       .setFontColor("#d93025")
       .setFontWeight("bold");
     
-    SpreadsheetApp.getUi().alert('❌ Error', error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('�� Error', error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
@@ -6528,7 +6540,7 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
   const file = monthFolder.createFile(xlsxBlob);
   const fileUrl = file.getUrl();
   
-  Logger.log(`✅ Saved violations report: ${filename} (${violationCount} violations)`);
+  Logger.log(`� Saved violations report: ${filename} (${violationCount} violations)`);
   
   return {
     success: true,
@@ -6623,16 +6635,10 @@ function crawlFolder_(folder, depth) {
 // =====================================================================================================================
 // ======================================== END DRIVE FOLDER CRAWLER ==================================================
 // =====================================================================================================================
-
+// NOTE: Audit system functions (setupAndRefreshRawDataAudit, setupAndRefreshViolationsAudit, etc.)
+// and related constants (GAP_FILL_STATE_KEY, VIOLATIONS_ROOT_FOLDER_ID, etc.)
+// are now located in AuditSystems.gs file for better code organization and to avoid duplicate definitions.
 // =====================================================================================================================
-// ========================================= AUTO GAP FILL SYSTEM =====================================================
-// =====================================================================================================================
-
-// Constants
-const GAP_FILL_STATE_KEY = 'gap_fill_state';
-const GAP_FILL_TRIGGER_KEY = 'gap_fill_trigger_id';
-const GAP_FILL_TIME_BUDGET_MS = 5.5 * 60 * 1000; // 5.5 minutes safety margin
-const VIOLATIONS_ROOT_FOLDER_ID = '1lJm0K1LLo9ez29AcKCc4qtIbBC2uK3a9';
 
 /**
  * Setup Gap Fill Progress Sheet
@@ -6666,7 +6672,7 @@ function setupGapFillProgressSheet() {
   sheet.setFrozenRows(1);
   
   SpreadsheetApp.getUi().alert(
-    '✅ Gap Fill Progress Sheet Ready',
+    '� Gap Fill Progress Sheet Ready',
     'Progress tracking sheet created!\n\n' +
     'Run "Start Auto Gap Fill" to begin processing missing violations reports.',
     SpreadsheetApp.getUi().ButtonSet.OK
@@ -6692,7 +6698,7 @@ function getMissingDatesFromAudit_() {
     const dateStr = row[0];
     const status = row[1];
     
-    if (status === '❌ MISSING' && dateStr) {
+    if (status === '�� MISSING' && dateStr) {
       const checkDate = new Date(dateStr);
       // Skip dates before 4.14.25 - no data exists
       if (checkDate >= startDate) {
@@ -6724,7 +6730,7 @@ function initializeGapFillProgress_(missingDates) {
   // Add all missing dates as "Queued"
   const rows = missingDates.map(date => [
     date,
-    '⏳ Queued',
+    '�� Queued',
     new Date().toLocaleString(),
     0,
     '',
@@ -6760,13 +6766,13 @@ function updateGapFillProgress_(dateStr, status, errorMsg, driveFile) {
       
       // Color code status
       const statusCell = sheet.getRange(i + 1, 2);
-      if (status.includes('✅')) {
+      if (status.includes('�')) {
         statusCell.setBackground('#d4edda').setFontColor('#155724');
-      } else if (status.includes('❌')) {
+      } else if (status.includes('��')) {
         statusCell.setBackground('#f8d7da').setFontColor('#721c24');
       } else if (status.includes('🔄')) {
         statusCell.setBackground('#cfe2ff').setFontColor('#084298');
-      } else if (status.includes('⏳')) {
+      } else if (status.includes('��')) {
         statusCell.setBackground('#fff3cd').setFontColor('#856404');
       }
       
@@ -6912,15 +6918,6 @@ function saveViolationsAttachmentToDrive_(dateStr, attachment, originalFilename)
 }
 
 /**
- * Get next date as string
- */
-function getNextDate_(dateStr) {
-  const date = new Date(dateStr);
-  date.setDate(date.getDate() + 1);
-  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-}
-
-/**
  * Start Auto Gap Fill process
  */
 function startAutoGapFill() {
@@ -6935,7 +6932,7 @@ function startAutoGapFill() {
   
   if (missingDates.length === 0) {
     ui.alert(
-      '✅ No Gaps Found',
+      '� No Gaps Found',
       'All violations reports are present in Drive!\n\nNo gap-fill needed.',
       ui.ButtonSet.OK
     );
@@ -6958,7 +6955,7 @@ function startAutoGapFill() {
   saveGapFillState_(state);
   
   ui.alert(
-    '🚀 Gap Fill Started',
+    '� Gap Fill Started',
     `Found ${count} missing violations reports.\n\n` +
     `Auto gap-fill will process them automatically.\n\n` +
     `Create an auto-resume trigger (10 min) from the menu to enable continuous processing.`,
@@ -6977,7 +6974,7 @@ function processGapFillChunk_() {
   const state = getGapFillState_();
   
   if (!state || !state.queue || state.queue.length === 0) {
-    Logger.log('✅ Gap fill complete or no state found');
+    Logger.log('� Gap fill complete or no state found');
     return;
   }
   
@@ -6994,13 +6991,13 @@ function processGapFillChunk_() {
       const emailResult = searchGmailForViolationsAttachment_(dateStr);
       
       if (emailResult.found) {
-        Logger.log(`✅ Found email attachment for ${dateStr}`);
+        Logger.log(`� Found email attachment for ${dateStr}`);
         updateGapFillProgress_(dateStr, '🔄 Saving to Drive...', '', '');
         
         // Save to Drive
         const saveResult = saveViolationsAttachmentToDrive_(dateStr, emailResult.attachment, emailResult.filename);
         
-        updateGapFillProgress_(dateStr, '✅ Complete (from email)', '', saveResult.filename);
+        updateGapFillProgress_(dateStr, '� Complete (from email)', '', saveResult.filename);
         state.successful++;
         state.processed++;
         state.queue.shift(); // Remove from queue
@@ -7009,16 +7006,16 @@ function processGapFillChunk_() {
       }
       
       // Step 2: Email not found, need to run Time Machine
-      Logger.log(`⚠️ No email found for ${dateStr}, running Time Machine`);
+      Logger.log(`��️ No email found for ${dateStr}, running Time Machine`);
       updateGapFillProgress_(dateStr, '🔄 Running Time Machine...', '', '');
       
       const tmResult = runTimeMachineForDate_(dateStr);
       
       if (tmResult.success) {
-        updateGapFillProgress_(dateStr, '✅ Complete (regenerated)', '', tmResult.filename);
+        updateGapFillProgress_(dateStr, '� Complete (regenerated)', '', tmResult.filename);
         state.successful++;
       } else {
-        updateGapFillProgress_(dateStr, '❌ Failed', tmResult.error, '');
+        updateGapFillProgress_(dateStr, '�� Failed', tmResult.error, '');
         state.failed++;
       }
       
@@ -7027,8 +7024,8 @@ function processGapFillChunk_() {
       saveGapFillState_(state);
       
     } catch (e) {
-      Logger.log(`❌ Error processing ${dateStr}: ${e}`);
-      updateGapFillProgress_(dateStr, '❌ Failed', String(e), '');
+      Logger.log(`�� Error processing ${dateStr}: ${e}`);
+      updateGapFillProgress_(dateStr, '�� Failed', String(e), '');
       state.failed++;
       state.processed++;
       state.queue.shift();
@@ -7040,10 +7037,10 @@ function processGapFillChunk_() {
   saveGapFillState_(state);
   
   if (state.queue.length === 0) {
-    Logger.log(`✅ Gap fill complete! Processed: ${state.processed}, Successful: ${state.successful}, Failed: ${state.failed}`);
+    Logger.log(`� Gap fill complete! Processed: ${state.processed}, Successful: ${state.successful}, Failed: ${state.failed}`);
     clearGapFillState_();
   } else {
-    Logger.log(`⏸️ Gap fill paused. Remaining: ${state.queue.length}/${state.processed + state.queue.length}`);
+    Logger.log(`��️ Gap fill paused. Remaining: ${state.queue.length}/${state.processed + state.queue.length}`);
   }
 }
 
@@ -7143,7 +7140,7 @@ function viewGapFillStatus() {
 function resetGapFill() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
-    '⚠️ Reset Gap Fill',
+    '��️ Reset Gap Fill',
     'This will clear all progress and start over.\n\nAre you sure?',
     ui.ButtonSet.YES_NO
   );
@@ -7157,7 +7154,7 @@ function resetGapFill() {
       ss.deleteSheet(sheet);
     }
     
-    ui.alert('✅ Reset Complete', 'Gap fill has been reset.', ui.ButtonSet.OK);
+    ui.alert('� Reset Complete', 'Gap fill has been reset.', ui.ButtonSet.OK);
   }
 }
 
@@ -7179,7 +7176,7 @@ function createGapFillAutoResumeTrigger() {
   props.setProperty(GAP_FILL_TRIGGER_KEY, trigger.getUniqueId());
   
   SpreadsheetApp.getUi().alert(
-    '✅ Auto-Resume Trigger Created',
+    '� Auto-Resume Trigger Created',
     'Gap fill will automatically resume every 10 minutes.\n\n' +
     'The trigger will process missing violations reports continuously until all gaps are filled.',
     SpreadsheetApp.getUi().ButtonSet.OK
@@ -7220,7 +7217,7 @@ function stopGapFillAndDeleteTrigger() {
   if (response === ui.Button.YES) {
     deleteGapFillAutoResumeTrigger_();
     ui.alert(
-      '✅ Stopped',
+      '� Stopped',
       'Gap fill process stopped and trigger deleted.\n\n' +
       'Progress has been saved. Run "Start Auto Gap Fill" to resume.',
       ui.ButtonSet.OK
@@ -7237,11 +7234,7 @@ function stopGapFillAndDeleteTrigger() {
 // ================================= RAW DATA GAP FILL SYSTEM ==========================================================
 // =====================================================================================================================
 
-// Constants for Raw Data Gap Fill
-const RAW_GAP_FILL_STATE_KEY = 'raw_gap_fill_state';
-const RAW_GAP_FILL_TRIGGER_KEY = 'raw_gap_fill_trigger_id';
-const RAW_GAP_FILL_TIME_BUDGET_MS = 5.5 * 60 * 1000; // 5.5 minutes
-const RAW_DATA_ROOT_FOLDER_ID = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+// NOTE: Constants for Raw Data Gap Fill are now in AuditSystems.gs to avoid duplicate declarations
 
 /**
  * Analyze network lifecycle from Audit Dashboard
@@ -7295,11 +7288,11 @@ function analyzeNetworkLifecycle_() {
     const missingNetworks = String(data[i][4] || '').trim();
     
     // Skip dates with no activity at all (0 files, no status)
-    if (filesInDrive === 0 && status !== '❌ MISSING' && status !== '⚠️ PARTIAL') continue;
+    if (filesInDrive === 0 && status !== '�� MISSING' && status !== '��️ PARTIAL') continue;
     
     // Get missing networks list
-    const missingList = missingNetworks && missingNetworks !== '—' 
-      ? missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '—')
+    const missingList = missingNetworks && missingNetworks !== '��' 
+      ? missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '��')
       : [];
     
     // Get present networks (all possible minus missing)
@@ -7426,10 +7419,10 @@ function getMissingRawDataFromAudit_() {
     const missingNetworks = String(data[i][4] || '').trim();
     
     // Only process MISSING or PARTIAL statuses
-    if (status === '❌ MISSING' || status === '⚠️ PARTIAL') {
+    if (status === '�� MISSING' || status === '��️ PARTIAL') {
       let networksList = [];
       
-      if (status === '❌ MISSING') {
+      if (status === '�� MISSING') {
         // Get all networks for this date
         const networksSheet = ss.getSheetByName("Networks");
         if (networksSheet) {
@@ -7439,9 +7432,9 @@ function getMissingRawDataFromAudit_() {
             if (netId) networksList.push(netId);
           }
         }
-      } else if (status === '⚠️ PARTIAL' && missingNetworks && missingNetworks !== '—') {
+      } else if (status === '��️ PARTIAL' && missingNetworks && missingNetworks !== '��') {
         // Parse missing networks from column
-        networksList = missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '—');
+        networksList = missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '��');
       }
       
       // Filter networks based on lifecycle
@@ -7549,6 +7542,10 @@ function clearRawGapFillState_() {
  * Download raw data CSVs for a specific date and network
  * Returns { success: boolean, filesFound: number, errorMsg: string }
  */
+/**
+ * Download raw data for a specific date and network from Gmail
+ * Returns: { success, filesFound, errorMsg, details }
+ */
 function downloadRawDataForDateNetwork_(dateStr, networkId) {
   try {
     // Convert date to YYYYMMDD format for filename matching
@@ -7556,9 +7553,8 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
     
     // Search Gmail for raw data emails on specific date
     const targetDate = new Date(dateStr);
-    const searchDateStr = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     
-    // Gmail's date search: use after:(day before) before:(day after) to get emails ON target date
+    // Gmail's date search: use after:(day before) before:(day after) to catch emails that arrive just after midnight
     const dayBefore = new Date(targetDate);
     dayBefore.setDate(dayBefore.getDate() - 1);
     const dayAfter = new Date(targetDate);
@@ -7571,13 +7567,20 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
     
     Logger.log(`Searching for ${dateStr} (${filenameDateStr}): ${fullQuery}`);
     
-    const threads = GmailApp.search(fullQuery, 0, 20);
+    const threads = GmailApp.search(fullQuery, 0, 50); // Increased to 50 to catch all networks
     
     if (threads.length === 0) {
-      return { success: false, filesFound: 0, errorMsg: 'No emails found on target date' };
+      return { 
+        success: false, 
+        filesFound: 0, 
+        errorMsg: 'No emails found on target date',
+        details: '? No raw data emails found for this date'
+      };
     }
     
-    let filesFound = 0;
+    let csvsSaved = 0;
+    let zipFilesExtracted = 0;
+    const savedFiles = [];
     
     // Search through all matching emails
     for (const thread of threads) {
@@ -7588,28 +7591,84 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
         
         for (const attachment of attachments) {
           const filename = attachment.getName();
+          const lowerFilename = filename.toLowerCase();
           
           // Pattern: {networkId}_BKCM360_Global_QA_Check_{YYYYMMDD}_{time}_{reportId}.{csv|zip}
           if (filename.startsWith(`${networkId}_`) && filename.includes(`_${filenameDateStr}_`)) {
-            Logger.log(`  ✅ MATCH: ${filename}`);
-            const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
-            if (saved) {
-              filesFound++;
+            Logger.log(`  ? MATCH: ${filename}`);
+            
+            // Handle ZIP files - extract CSVs
+            if (lowerFilename.endsWith('.zip')) {
+              try {
+                const zipBlob = attachment.copyBlob();
+                const unzipped = Utilities.unzip(zipBlob);
+                
+                for (const file of unzipped) {
+                  const unzippedName = file.getName();
+                  if (unzippedName.toLowerCase().endsWith('.csv')) {
+                    const saved = saveRawDataFileToDrive_(dateStr, networkId, file, unzippedName);
+                    if (saved) {
+                      csvsSaved++;
+                      savedFiles.push(unzippedName);
+                      Logger.log(`    ?? Extracted CSV from ZIP: ${unzippedName}`);
+                    }
+                  }
+                }
+                zipFilesExtracted++;
+              } catch (unzipError) {
+                Logger.log(`    ? Failed to extract ZIP ${filename}: ${unzipError.message}`);
+                return {
+                  success: false,
+                  filesFound: 0,
+                  errorMsg: `Failed to extract ZIP: ${unzipError.message}`,
+                  details: `? ZIP extraction failed: ${filename}`
+                };
+              }
+            } 
+            // Handle CSV files directly
+            else if (lowerFilename.endsWith('.csv')) {
+              const saved = saveRawDataFileToDrive_(dateStr, networkId, attachment, filename);
+              if (saved) {
+                csvsSaved++;
+                savedFiles.push(filename);
+              }
             }
           }
         }
       }
     }
     
-    if (filesFound === 0) {
-      return { success: false, filesFound: 0, errorMsg: `No files found for network ${networkId} on ${filenameDateStr}` };
+    if (csvsSaved === 0) {
+      return { 
+        success: false, 
+        filesFound: 0, 
+        errorMsg: `No files found for network ${networkId} on ${filenameDateStr}`,
+        details: `? Network ${networkId} not found (may not exist on this date)`
+      };
     }
     
-    return { success: true, filesFound, errorMsg: '' };
+    // Success - build details message
+    let details = `? Downloaded ${csvsSaved} CSV file${csvsSaved > 1 ? 's' : ''}`;
+    if (zipFilesExtracted > 0) {
+      details += ` (?? Extracted from ${zipFilesExtracted} ZIP${zipFilesExtracted > 1 ? 's' : ''})`;
+    }
+    details += ` for network ${networkId}`;
+    
+    return { 
+      success: true, 
+      filesFound: csvsSaved, 
+      errorMsg: '',
+      details: details
+    };
     
   } catch (error) {
     Logger.log(`Error downloading raw data for ${dateStr} / ${networkId}: ${error.message}`);
-    return { success: false, filesFound: 0, errorMsg: error.message };
+    return { 
+      success: false, 
+      filesFound: 0, 
+      errorMsg: error.message,
+      details: `? Error: ${error.message}`
+    };
   }
 }
 
@@ -7667,7 +7726,7 @@ function saveRawDataFileToDrive_(dateStr, networkId, attachment, originalFilenam
     const blob = attachment.copyBlob();
     dateFolder.createFile(blob.setName(originalFilename));
     
-    Logger.log(`✅ Saved: ${dateStr} / ${networkId} / ${originalFilename}`);
+    Logger.log(`� Saved: ${dateStr} / ${networkId} / ${originalFilename}`);
     return true;
     
   } catch (e) {
@@ -7686,7 +7745,7 @@ function startRawDataGapFill() {
   const existingState = getRawGapFillState_();
   if (existingState && existingState.status === 'running') {
     const response = ui.alert(
-      '⚠️ Gap Fill In Progress',
+      '��️ Gap Fill In Progress',
       'Raw data gap fill is already running.\n\nDo you want to continue from where it left off?',
       ui.ButtonSet.YES_NO
     );
@@ -7709,7 +7768,7 @@ function startRawDataGapFill() {
   const missing = getMissingRawDataFromAudit_();
   
   if (missing.length === 0) {
-    ui.alert('✅ No Gaps Found', 'All raw data is complete or all gaps are outside network active periods!', ui.ButtonSet.OK);
+    ui.alert('� No Gaps Found', 'All raw data is complete or all gaps are outside network active periods!', ui.ButtonSet.OK);
     return;
   }
   
@@ -7740,7 +7799,7 @@ function startRawDataGapFill() {
   
   // Ask if user wants auto-resume trigger
   const triggerResponse = ui.alert(
-    '🚀 Raw Data Gap Fill Ready',
+    '� Raw Data Gap Fill Ready',
     `Found ${queue.length} valid date/network combinations to process.\n\n` +
     `This will take multiple runs due to Gmail quota and time limits.\n\n` +
     `Do you want to create an AUTO-RESUME TRIGGER?\n` +
@@ -7753,7 +7812,7 @@ function startRawDataGapFill() {
   }
   
   ui.alert(
-    '▶️ Starting Now',
+    '��️ Starting Now',
     `Processing will begin now and update the Audit Dashboard Notes column.\n\n` +
     `You can check progress with "View Status" or watch the Notes column.`,
     ui.ButtonSet.OK
@@ -7762,6 +7821,7 @@ function startRawDataGapFill() {
   // Start processing
   processRawDataGapFillChunk_();
 }
+
 
 /**
  * Process a chunk of raw data gap fill (called by trigger or manually)
@@ -7780,14 +7840,54 @@ function processRawDataGapFillChunk_() {
     return;
   }
   
+  // Track Gmail quota usage
+  const docProps = PropertiesService.getDocumentProperties();
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const quotaKey = `RAW_GAP_FILL_QUOTA_${today}`;
+  const dailyEmailCount = parseInt(docProps.getProperty(quotaKey) || '0', 10);
+  
+  const MAX_EMAILS_PER_CHUNK = 30; // Conservative limit per run
+  const MAX_EMAILS_PER_DAY = 100; // Daily Gmail quota limit
+  
+  Logger.log(`📧 Starting chunk - Daily quota used: ${dailyEmailCount}/${MAX_EMAILS_PER_DAY}`);
+  
+  if (dailyEmailCount >= MAX_EMAILS_PER_DAY) {
+    Logger.log('⚠️ Daily Gmail quota exhausted - pausing until tomorrow');
+    
+    // Update audit note for current date
+    if (state.currentIndex < state.queue.length) {
+      const currentDate = state.queue[state.currentIndex].date;
+      updateRawDataAuditNotes_(currentDate, '⏸️ Paused: Daily Gmail quota reached. Will resume tomorrow.');
+    }
+    
+    // Don't show alert if trigger is active
+    const triggerId = PropertiesService.getScriptProperties().getProperty(RAW_GAP_FILL_TRIGGER_KEY);
+    if (!triggerId) {
+      SpreadsheetApp.getUi().alert(
+        '⏸️ Gap Fill Paused',
+        `Daily Gmail quota limit reached (${MAX_EMAILS_PER_DAY} emails).\n\n` +
+        `Processed today: ${state.processed} items\n` +
+        `Remaining: ${state.queue.length - state.currentIndex} items\n\n` +
+        `Will automatically resume tomorrow when quota resets.`,
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+    }
+    return;
+  }
+  
   const queue = state.queue;
   let processedThisRun = 0;
+  let emailsThisRun = 0;
   
   while (state.currentIndex < queue.length) {
     // Check time budget
     if ((Date.now() - startTime) >= RAW_GAP_FILL_TIME_BUDGET_MS) {
-      Logger.log(`⏸️ Time budget reached. Processed ${state.processed}/${queue.length}`);
+      Logger.log(`⏱️ Time budget reached. Processed ${state.processed}/${queue.length}`);
       saveRawGapFillState_(state);
+      
+      // Update quota counter
+      docProps.setProperty(quotaKey, String(dailyEmailCount + emailsThisRun));
+      Logger.log(`📧 Chunk complete - Emails this run: ${emailsThisRun}, Daily total: ${dailyEmailCount + emailsThisRun}`);
       
       // Don't show alert if trigger is active (silent resume)
       const props = PropertiesService.getScriptProperties();
@@ -7796,11 +7896,13 @@ function processRawDataGapFillChunk_() {
       if (!triggerId) {
         // Manual run - show alert
         SpreadsheetApp.getUi().alert(
-          '⏸️ Gap Fill Paused',
+          '⏱️ Gap Fill Paused',
           `Time limit reached. Progress saved.\n\n` +
           `Processed: ${state.processed}/${queue.length}\n` +
           `Successful: ${state.successful}\n` +
-          `Failed: ${state.failed}\n\n` +
+          `Failed: ${state.failed}\n` +
+          `Emails used: ${emailsThisRun}\n` +
+          `Daily quota: ${dailyEmailCount + emailsThisRun}/${MAX_EMAILS_PER_DAY}\n\n` +
           `Run again to continue, or create auto-resume trigger.`,
           SpreadsheetApp.getUi().ButtonSet.OK
         );
@@ -7810,25 +7912,48 @@ function processRawDataGapFillChunk_() {
       return;
     }
     
+    // Check Gmail quota limits
+    if (emailsThisRun >= MAX_EMAILS_PER_CHUNK || 
+        (dailyEmailCount + emailsThisRun) >= MAX_EMAILS_PER_DAY) {
+      Logger.log(`📧 Gmail quota limit reached for this chunk (${emailsThisRun} emails processed)`);
+      saveRawGapFillState_(state);
+      docProps.setProperty(quotaKey, String(dailyEmailCount + emailsThisRun));
+      
+      const triggerId = PropertiesService.getScriptProperties().getProperty(RAW_GAP_FILL_TRIGGER_KEY);
+      if (!triggerId) {
+        SpreadsheetApp.getUi().alert(
+          '📧 Gmail Quota Limit',
+          `Email quota limit reached for this run.\n\n` +
+          `Processed: ${state.processed}/${queue.length}\n` +
+          `Emails this run: ${emailsThisRun}\n` +
+          `Daily total: ${dailyEmailCount + emailsThisRun}/${MAX_EMAILS_PER_DAY}\n\n` +
+          `Will resume automatically if trigger is active.`,
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+      }
+      return;
+    }
+    
     const item = queue[state.currentIndex];
     const dateStr = item.date;
     const networkId = item.network;
     
     Logger.log(`Processing [${state.currentIndex + 1}/${queue.length}]: ${dateStr} / ${networkId}`);
-    updateRawDataAuditNotes_(dateStr, `⏳ Processing network ${networkId}...`);
+    updateRawDataAuditNotes_(dateStr, `🔍 Processing network ${networkId}...`);
     
     // Try to download from Gmail
     const result = downloadRawDataForDateNetwork_(dateStr, networkId);
+    emailsThisRun++; // Count Gmail search
     
     if (result.success) {
       item.status = 'success';
       state.successful++;
-      updateRawDataAuditNotes_(dateStr, `✅ Downloaded ${result.filesFound} file(s) for ${networkId}`);
+      updateRawDataAuditNotes_(dateStr, result.details);
       Logger.log(`✅ Success: ${dateStr} / ${networkId} - ${result.filesFound} files`);
     } else {
       item.status = 'failed';
       state.failed++;
-      updateRawDataAuditNotes_(dateStr, `❌ Failed ${networkId}: ${result.errorMsg}`);
+      updateRawDataAuditNotes_(dateStr, result.details);
       Logger.log(`❌ Failed: ${dateStr} / ${networkId} - ${result.errorMsg}`);
     }
     
@@ -7840,12 +7965,18 @@ function processRawDataGapFillChunk_() {
     if (state.processed % 5 === 0) {
       saveRawGapFillState_(state);
     }
+    
+    // Throttle to avoid rate limiting (100ms between searches)
+    Utilities.sleep(100);
   }
   
   // All done
   state.status = 'completed';
   state.endTime = new Date().toISOString();
   saveRawGapFillState_(state);
+  
+  // Update final quota counter
+  docProps.setProperty(quotaKey, String(dailyEmailCount + emailsThisRun));
   
   const totalTime = (Date.now() - new Date(state.startTime).getTime()) / 1000;
   const thisRunTime = (Date.now() - startTime) / 1000;
@@ -7859,7 +7990,9 @@ function processRawDataGapFillChunk_() {
     '✅ Raw Data Gap Fill Complete',
     `Finished processing ${state.processed} items.\n\n` +
     `Successful: ${state.successful}\n` +
-    `Failed: ${state.failed}\n\n` +
+    `Failed: ${state.failed}\n` +
+    `Emails processed: ${emailsThisRun}\n` +
+    `Daily quota used: ${dailyEmailCount + emailsThisRun}/${MAX_EMAILS_PER_DAY}\n\n` +
     `Total time: ${(totalTime / 60).toFixed(1)} minutes\n\n` +
     `Check the Audit Dashboard Notes column for details.\n` +
     `Re-run the Raw Data Audit to update statuses.`,
@@ -7898,14 +8031,14 @@ function viewRawDataGapFillStatus() {
 function resetRawDataGapFill() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
-    '⚠️ Reset Raw Data Gap Fill',
+    '��️ Reset Raw Data Gap Fill',
     'This will clear all progress and start over.\n\nAre you sure?',
     ui.ButtonSet.YES_NO
   );
   
   if (response === ui.Button.YES) {
     clearRawGapFillState_();
-    ui.alert('✅ Reset Complete', 'Raw data gap fill has been reset.', ui.ButtonSet.OK);
+    ui.alert('� Reset Complete', 'Raw data gap fill has been reset.', ui.ButtonSet.OK);
   }
 }
 
@@ -7924,7 +8057,7 @@ function createRawGapFillAutoResumeTrigger() {
   props.setProperty(RAW_GAP_FILL_TRIGGER_KEY, trigger.getUniqueId());
   
   SpreadsheetApp.getUi().alert(
-    '✅ Auto-Resume Trigger Created',
+    '� Auto-Resume Trigger Created',
     'Raw data gap fill will automatically resume every 10 minutes.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
@@ -7970,7 +8103,7 @@ function stopRawDataGapFillAndDeleteTrigger() {
     }
     
     ui.alert(
-      '✅ Stopped',
+      '� Stopped',
       'Raw data gap fill stopped and trigger deleted.\n\n' +
       'Run "Start Raw Data Gap Fill" to resume.',
       ui.ButtonSet.OK
