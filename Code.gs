@@ -205,6 +205,7 @@ function clearViolations() {
   for (let i = 0; i < correctHeaders.length; i++) {
     if (currentHeaders[i] !== correctHeaders[i]) {
       headersMatch = false;
+      Logger.log(`⚠️ Header mismatch at column ${i + 1}: "${currentHeaders[i]}" vs "${correctHeaders[i]}"`);
       break;
     }
   }
@@ -215,6 +216,8 @@ function clearViolations() {
     sheet.getRange("A1:Y1").setValues([correctHeaders]).setFontWeight("bold");
     Logger.log('✅ Violations headers corrected');
     return; // Nothing to clear after reset
+  } else {
+    Logger.log('✅ Violations headers are correct (25 columns)');
   }
   
   const lastRow = sheet.getLastRow();
@@ -1313,13 +1316,15 @@ function runQAOnly() {
       const width = resultsChunk[0].length;
       const startWriteRow = out.getLastRow() + 1;
       out.getRange(startWriteRow, 1, resultsChunk.length, width).setValues(resultsChunk);
+      Logger.log(`✍️ Wrote ${resultsChunk.length} violations to row ${startWriteRow}`);
     }
 
     // Decide: finished or schedule next chunk
     if (state.next >= (data.length)) {
       clearQAState_();
       cancelQAChunkTrigger_();
-      Logger.log("� runQAOnly complete. Processed all " + totalRows + " data rows.");
+      const totalViolations = out.getLastRow() - 1; // Subtract header row
+      Logger.log("� runQAOnly complete. Processed all " + totalRows + " data rows. Total violations: " + totalViolations);
     } else {
       saveQAState_(state);
       Logger.log("�� runQAOnly partial: processed " + processed + " rows this run. Next row index: "
@@ -6758,7 +6763,17 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const violationsSheet = ss.getSheetByName("Violations");
   
-  if (!violationsSheet || violationsSheet.getLastRow() < 2) {
+  if (!violationsSheet) {
+    return {
+      success: false,
+      error: "Violations sheet not found"
+    };
+  }
+  
+  const lastRow = violationsSheet.getLastRow();
+  Logger.log(`� Violations sheet has ${lastRow} total rows (including header)`);
+  
+  if (lastRow < 2) {
     return {
       success: false,
       error: "No violations data to save (sheet is empty or has only headers)"
