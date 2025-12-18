@@ -182,19 +182,39 @@ function clearViolations() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("Violations");
   
+  const correctHeaders = [
+    "Network ID", "Report Date", "Advertiser", "Campaign", "Campaign Start Date", "Campaign End Date",
+    "Ad", "Placement ID", "Placement", "Placement Start Date", "Placement End Date",
+    "Impressions", "Clicks", "CTR (%)", "Days Until Placement End", "Flight Completion %",
+    "Days Left in the Month", "CPC Risk", "$CPC", "$CPM", "Issue Type", "Details",
+    "Last Imp Change", "Last Click Change", "Owner (Ops)"
+  ];
+  
   // Auto-create Violations sheet if it doesn't exist
   if (!sheet) {
     Logger.log('⚠️ Violations sheet not found - creating it now...');
     sheet = ss.insertSheet("Violations");
-    sheet.getRange("A1:Y1").setValues([[
-      "Network ID", "Report Date", "Advertiser", "Campaign", "Campaign Start Date", "Campaign End Date",
-      "Ad", "Placement ID", "Placement", "Placement Start Date", "Placement End Date",
-      "Impressions", "Clicks", "CTR (%)", "Days Until Placement End", "Flight Completion %",
-      "Days Left in the Month", "CPC Risk", "$CPC", "$CPM", "Issue Type", "Details",
-      "Last Imp Change", "Last Click Change", "Owner (Ops)"
-    ]]).setFontWeight("bold");
-    Logger.log('✅ Violations sheet created');
+    sheet.getRange("A1:Y1").setValues([correctHeaders]).setFontWeight("bold");
+    Logger.log('✅ Violations sheet created with 25-column format');
     return; // Nothing to clear on new sheet
+  }
+  
+  // Check and fix headers if wrong
+  const currentHeaders = sheet.getRange(1, 1, 1, 25).getValues()[0];
+  let headersMatch = true;
+  for (let i = 0; i < correctHeaders.length; i++) {
+    if (currentHeaders[i] !== correctHeaders[i]) {
+      headersMatch = false;
+      break;
+    }
+  }
+  
+  if (!headersMatch) {
+    Logger.log('⚠️ Violations headers incorrect - fixing to 25-column format...');
+    sheet.clearContents();
+    sheet.getRange("A1:Y1").setValues([correctHeaders]).setFontWeight("bold");
+    Logger.log('✅ Violations headers corrected');
+    return; // Nothing to clear after reset
   }
   
   const lastRow = sheet.getLastRow();
