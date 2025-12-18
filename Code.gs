@@ -182,46 +182,24 @@ function clearViolations() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("Violations");
   
-  const correctHeaders = [
-    "Network ID", "Report Date", "Advertiser", "Campaign", "Campaign Start Date", "Campaign End Date",
-    "Ad", "Placement ID", "Placement", "Placement Start Date", "Placement End Date",
-    "Impressions", "Clicks", "CTR (%)", "Days Until Placement End", "Flight Completion %",
-    "Days Left in the Month", "CPC Risk", "$CPC", "$CPM", "Issue Type", "Details",
-    "Last Imp Change", "Last Click Change", "Owner (Ops)"
-  ];
-  
   // Auto-create Violations sheet if it doesn't exist
   if (!sheet) {
     Logger.log('⚠️ Violations sheet not found - creating it now...');
     sheet = ss.insertSheet("Violations");
-    sheet.getRange("A1:Y1").setValues([correctHeaders]).setFontWeight("bold");
-    Logger.log('✅ Violations sheet created with 25-column format');
-    return; // Nothing to clear on new sheet
-  }
-  
-  // Check and fix headers if wrong
-  const currentHeaders = sheet.getRange(1, 1, 1, 25).getValues()[0];
-  let headersMatch = true;
-  for (let i = 0; i < correctHeaders.length; i++) {
-    if (currentHeaders[i] !== correctHeaders[i]) {
-      headersMatch = false;
-      Logger.log(`⚠️ Header mismatch at column ${i + 1}: "${currentHeaders[i]}" vs "${correctHeaders[i]}"`);
-      break;
-    }
-  }
-  
-  if (!headersMatch) {
-    Logger.log('⚠️ Violations headers incorrect - fixing to 25-column format...');
-    sheet.clearContents();
-    sheet.getRange("A1:Y1").setValues([correctHeaders]).setFontWeight("bold");
-    Logger.log('✅ Violations headers corrected');
-    return; // Nothing to clear after reset
-  } else {
-    Logger.log('✅ Violations headers are correct (25 columns)');
+    sheet.getRange("A1:Y1").setValues([[
+      "Network ID", "Report Date", "Advertiser", "Campaign", "Campaign Start Date", "Campaign End Date",
+      "Ad", "Placement ID", "Placement", "Placement Start Date", "Placement End Date",
+      "Impressions", "Clicks", "CTR (%)", "Days Until Placement End", "Flight Completion %",
+      "Days Left in the Month", "CPC Risk", "$CPC", "$CPM", "Issue Type", "Details",
+      "Last Imp Change", "Last Click Change", "Owner (Ops)"
+    ]]).setFontWeight("bold");
+    Logger.log('✅ Violations sheet created with 25 columns');
+    // Don't return - sheet now exists and is ready to use
   }
   
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) {
+    Logger.log(`🧹 Clearing ${lastRow - 1} violation rows`);
     sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
   }
 }
@@ -1316,15 +1294,13 @@ function runQAOnly() {
       const width = resultsChunk[0].length;
       const startWriteRow = out.getLastRow() + 1;
       out.getRange(startWriteRow, 1, resultsChunk.length, width).setValues(resultsChunk);
-      Logger.log(`✍️ Wrote ${resultsChunk.length} violations to row ${startWriteRow}`);
     }
 
     // Decide: finished or schedule next chunk
     if (state.next >= (data.length)) {
       clearQAState_();
       cancelQAChunkTrigger_();
-      const totalViolations = out.getLastRow() - 1; // Subtract header row
-      Logger.log("� runQAOnly complete. Processed all " + totalRows + " data rows. Total violations: " + totalViolations);
+      Logger.log("� runQAOnly complete. Processed all " + totalRows + " data rows.");
     } else {
       saveQAState_(state);
       Logger.log("�� runQAOnly partial: processed " + processed + " rows this run. Next row index: "
@@ -6763,17 +6739,7 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const violationsSheet = ss.getSheetByName("Violations");
   
-  if (!violationsSheet) {
-    return {
-      success: false,
-      error: "Violations sheet not found"
-    };
-  }
-  
-  const lastRow = violationsSheet.getLastRow();
-  Logger.log(`� Violations sheet has ${lastRow} total rows (including header)`);
-  
-  if (lastRow < 2) {
+  if (!violationsSheet || violationsSheet.getLastRow() < 2) {
     return {
       success: false,
       error: "No violations data to save (sheet is empty or has only headers)"
