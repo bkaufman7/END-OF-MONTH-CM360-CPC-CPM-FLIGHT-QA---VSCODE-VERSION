@@ -31,7 +31,37 @@ function onOpen() {
       .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createRawGapFillAutoResumeTrigger")
       .addItem("🛑 Stop & Delete Trigger", "stopRawDataGapFillAndDeleteTrigger")
       .addSeparator()
+      .addItem("🤖 Start Smart Automation (15min process + 10min refresh)", "startSmartRawDataAutomation")
+      .addItem("🛑 Stop Smart Automation", "stopSmartRawDataAutomation")
+      .addSeparator()
       .addItem("🔄 Reset (Start Over)", "resetRawDataGapFill"))
+    .addSeparator()
+    
+    // === RAW DATA GAP FILL (TEST MODE - 2 PHASE) ===
+    .addSubMenu(ui.createMenu("🧪 Raw Data Gap Fill (TEST)")
+      .addItem("▶️ Phase 1: Download All Attachments", "startTestPhase1Download")
+      .addItem("📦 Phase 2: Extract All ZIPs", "startTestPhase2Extraction")
+      .addSeparator()
+      .addItem("📊 View Download Progress (Phase 1)", "viewTestPhase1Status")
+      .addItem("📊 View Extraction Progress (Phase 2)", "viewTestPhase2Status")
+      .addItem("📈 View Today's Progress", "viewTodayProgress")
+      .addSeparator()
+      .addItem("⏰ Create Phase 1 Auto-Resume", "createTestPhase1Trigger")
+      .addItem("⏰ Create Phase 2 Auto-Resume", "createTestPhase2Trigger")
+      .addSeparator()
+      .addItem("🤖 Start Complete TEST Automation", "startCompleteTestAutomation")
+      .addItem("🛑 Stop All TEST Automation", "stopCompleteTestAutomation")
+      .addSeparator()
+      .addItem("🌅 Setup Daily Morning Automation (7-8 AM)", "setupDailyMorningAutomation")
+      .addItem("📧 Create Daily Email Trigger (7:30 PM)", "createDailyEmailTrigger")
+      .addItem("📅 Setup Weekly Auto-Download (Sat 11:30 PM)", "setupWeeklyAutoDownload")
+      .addSeparator()
+      .addItem("🛑 Stop All TEST Triggers", "stopAllTestTriggers")
+      .addSeparator()
+      .addItem("🔍 Audit Test Folder", "auditTestFolder")
+      .addItem("🔧 Fix Incomplete Dates (Auto)", "fixIncompleteDatesAuto")
+      .addItem("🧹 Cleanup & Verify", "cleanupAndVerifyTest")
+      .addItem("🔄 Reset TEST Mode", "resetTestMode"))
     .addSeparator()
     
     // === VIOLATIONS GAP FILL ===
@@ -42,6 +72,9 @@ function onOpen() {
       .addSeparator()
       .addItem("⏰ Create Auto-Resume Trigger (10 min)", "createGapFillAutoResumeTrigger")
       .addItem("🛑 Stop & Delete Trigger", "stopGapFillAndDeleteTrigger")
+      .addSeparator()
+      .addItem("🤖 Start Smart Automation (15min process + 10min refresh)", "startSmartGapFillAutomation")
+      .addItem("🛑 Stop Smart Automation", "stopSmartGapFillAutomation")
       .addSeparator()
       .addItem("🔄 Reset (Start Over)", "resetGapFill"))
     .addSeparator()
@@ -146,8 +179,22 @@ function createDailyEmailTrigger() {
 // clearViolations
 // ---------------------
 function clearViolations() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Violations");
-  if (!sheet) return;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Violations");
+  
+  // Auto-create Violations sheet if it doesn't exist
+  if (!sheet) {
+    Logger.log('⚠️ Violations sheet not found - creating it now...');
+    sheet = ss.insertSheet("Violations");
+    sheet.getRange("A1:O1").setValues([[
+      "Network", "Advertiser", "Campaign", "Placement", "Placement ID",
+      "Start Date", "End Date", "Cost Structure", "Issue Type", 
+      "Owner", "Severity", "$ at Risk", "Low Priority", "Report Date", "Notes"
+    ]]).setFontWeight("bold");
+    Logger.log('✅ Violations sheet created');
+    return; // Nothing to clear on new sheet
+  }
+  
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) {
     sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
@@ -1032,9 +1079,31 @@ function runQAOnly() {
 
   try {
     const ss  = SpreadsheetApp.getActiveSpreadsheet();
-    const raw = ss.getSheetByName("Raw Data");
-    const out = ss.getSheetByName("Violations");
-    if (!raw || !out) return;
+    let raw = ss.getSheetByName("Raw Data");
+    let out = ss.getSheetByName("Violations");
+    
+    // Auto-create sheets if they don't exist
+    if (!raw) {
+      Logger.log('⚠️ Raw Data sheet not found - creating it now...');
+      raw = ss.insertSheet("Raw Data");
+      raw.getRange("A1:H1").setValues([[
+        "Network ID", "Advertiser", "Campaign", "Placement", 
+        "Start Date", "End Date", "Cost Structure", "Report Date"
+      ]]).setFontWeight("bold");
+      Logger.log('✅ Raw Data sheet created');
+      return; // No data to process yet
+    }
+    
+    if (!out) {
+      Logger.log('⚠️ Violations sheet not found - creating it now...');
+      out = ss.insertSheet("Violations");
+      out.getRange("A1:O1").setValues([[
+        "Network", "Advertiser", "Campaign", "Placement", "Placement ID",
+        "Start Date", "End Date", "Cost Structure", "Issue Type", 
+        "Owner", "Severity", "$ at Risk", "Low Priority", "Report Date", "Notes"
+      ]]).setFontWeight("bold");
+      Logger.log('✅ Violations sheet created');
+    }
 
     const data = raw.getDataRange().getValues();
     if (!data || data.length <= 1) return;
@@ -3130,7 +3199,7 @@ function getMonthName_(month) {
 // CONSTANTS
 // ---------------------
 const RAW_DATA_FOLDER_ID = '1u28i_kcx9D-LQoSiOj08sKfEAZyc7uWN'; // Same root as other archives
-const RAW_DATA_SEARCH_SUBJECT = 'BKCM360 Global QA Check';
+const RAW_DATA_SEARCH_SUBJECT = 'CM360 CPC/CPM FLIGHT QA';
 const RAW_BATCH_SIZE = 100; // Process 100 emails per execution (increased from 20)
 const RAW_SEARCH_MAX = 500; // Gmail's max threads per search
 
@@ -4528,7 +4597,7 @@ function processComprehensiveAuditBatch_() {
  * expectedCounts format: "date|networkId" => count
  */
 function scanGmailBatch_(startIndex, expectedCounts, startTime, maxExecutionMs) {
-  const query = 'subject:"BKCM360 Global QA Check"';
+  const query = 'subject:"CM360 CPC/CPM FLIGHT QA"';
   const batchSize = 100;
   let currentIndex = startIndex;
   
@@ -4672,7 +4741,7 @@ function viewComprehensiveAuditProgress() {
  */
 function scanGmailForExpectedFiles_() {
   const expectedFiles = new Map();
-  const query = 'subject:"BKCM360 Global QA Check"';
+  const query = 'subject:"CM360 CPC/CPM FLIGHT QA"';
   let startIndex = 0;
   const batchSize = 100;
   
@@ -5715,7 +5784,7 @@ function archiveSingleDate_(date) {
   const searchDate = `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
   
   // Search for emails on this specific date
-  const query = `subject:"BKCM360 Global QA Check" after:${searchDate} before:${getNextDay_(searchDate)}`;
+  const query = `subject:"CM360 CPC/CPM FLIGHT QA" after:${searchDate} before:${getNextDay_(searchDate)}`;
   
   Logger.log(`Searching: ${query}`);
   
@@ -6407,19 +6476,171 @@ function runTimeMachineQA_(dateStr) {
  * Download raw CSV files from Gmail for a specific date
  */
 function downloadRawDataForDate_(dateStr) {
+  // Try Drive first (much faster!)
+  Logger.log(`🔍 Attempting to load raw data from Drive for ${dateStr}...`);
+  const driveResult = downloadRawDataFromDrive_(dateStr);
+  
+  if (driveResult.success) {
+    Logger.log(`✅ Drive: Loaded ${driveResult.filesProcessed} CSV files from Drive`);
+    return driveResult;
+  }
+  
+  // Fallback to Gmail if Drive folder doesn't exist
+  Logger.log(`⚠️ Drive folder not found. Falling back to Gmail...`);
+  return downloadRawDataFromGmail_(dateStr);
+}
+
+/**
+ * Download raw data from Google Drive (FAST!)
+ */
+function downloadRawDataFromDrive_(dateStr) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rawSheet = ss.getSheetByName("Raw Data");
+  let rawSheet = ss.getSheetByName("Raw Data");
   
-  const nextDate = getNextDate_(dateStr);
-  const searchQuery = `subject:"BKCM360 Global QA Check" after:${dateStr} before:${nextDate} has:attachment`;
+  // Auto-create Raw Data sheet if it doesn't exist
+  if (!rawSheet) {
+    Logger.log('⚠️ Raw Data sheet not found - creating it now...');
+    rawSheet = ss.insertSheet("Raw Data");
+    rawSheet.getRange("A1:H1").setValues([[
+      "Network ID", "Advertiser", "Campaign", "Placement", 
+      "Start Date", "End Date", "Cost Structure", "Report Date"
+    ]]).setFontWeight("bold");
+    Logger.log('✅ Raw Data sheet created');
+  }
+  try {
+    // Build folder path: Root/2025/04-April/2025-04-15/
+    const RAW_DATA_ROOT_ID = '1qA77_YET8RLiES7X7NoUT5jzTHDJ3k61';
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1; // 1-12
+    const day = date.getDate();
+    
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthFolder = `${String(month).padStart(2, '0')}-${monthNames[month - 1]}`;
+    const dateFolder = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    
+    Logger.log(`📁 Looking for: ${year}/${monthFolder}/${dateFolder}/`);
+    
+    // Navigate folder structure
+    const rootFolder = DriveApp.getFolderById(RAW_DATA_ROOT_ID);
+    
+    // Find year folder
+    const yearFolders = rootFolder.getFoldersByName(String(year));
+    if (!yearFolders.hasNext()) {
+      return { success: false, error: `Year folder ${year} not found in Drive` };
+    }
+    const yearFolderObj = yearFolders.next();
+    
+    // Find month folder
+    const monthFolders = yearFolderObj.getFoldersByName(monthFolder);
+    if (!monthFolders.hasNext()) {
+      return { success: false, error: `Month folder ${monthFolder} not found in Drive` };
+    }
+    const monthFolderObj = monthFolders.next();
+    
+    // Find date folder
+    const dateFolders = monthFolderObj.getFoldersByName(dateFolder);
+    if (!dateFolders.hasNext()) {
+      return { success: false, error: `Date folder ${dateFolder} not found in Drive` };
+    }
+    const dateFolderObj = dateFolders.next();
+    
+    // Get all CSV files
+    const csvFiles = dateFolderObj.getFilesByName('');
+    const allFiles = [];
+    while (csvFiles.hasNext()) {
+      allFiles.push(csvFiles.next());
+    }
+    
+    // Filter CSV files only
+    const csvOnly = allFiles.filter(f => f.getName().toLowerCase().endsWith('.csv'));
+    
+    if (csvOnly.length === 0) {
+      return { success: false, error: `No CSV files found in ${dateFolder}` };
+    }
+    
+    Logger.log(`📂 Found ${csvOnly.length} CSV files in Drive`);
+    
+    // Process each CSV
+    let filesProcessed = 0;
+    let currentRow = 2;
+    
+    for (const file of csvOnly) {
+      try {
+        const filename = file.getName();
+        const content = file.getBlob().getDataAsString();
+        
+        // Extract NetworkID: first digits before first underscore
+        // Example: "1068_BKCM360_Global_QA_Check_20250801_005620_5225494517.csv" → "1068"
+        const networkId = filename.split('_')[0];
+        
+        const rows = processCSV(content, networkId);
+        
+        if (rows.length > 0) {
+          rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
+          currentRow += rows.length;
+          filesProcessed++;
+          Logger.log(`  ✅ ${filename} → ${rows.length} rows (Network ${networkId})`);
+        }
+      } catch (error) {
+        Logger.log(`  ❌ Error processing ${file.getName()}: ${error}`);
+      }
+    }
+    
+    return {
+      success: true,
+      filesProcessed: filesProcessed,
+      source: 'Drive'
+    };
+    
+  } catch (error) {
+    return { success: false, error: `Drive access error: ${error}` };
+  }
+}
+
+/**
+ * Download raw data from Gmail (FALLBACK - slower)
+ */
+function downloadRawDataFromGmail_(dateStr) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let rawSheet = ss.getSheetByName("Raw Data");
   
-  Logger.log(`Searching Gmail: ${searchQuery}`);
+  // Auto-create Raw Data sheet if it doesn't exist
+  if (!rawSheet) {
+    Logger.log('⚠️ Raw Data sheet not found - creating it now...');
+    rawSheet = ss.insertSheet("Raw Data");
+    rawSheet.getRange("A1:H1").setValues([[
+      "Network ID", "Advertiser", "Campaign", "Placement", 
+      "Start Date", "End Date", "Cost Structure", "Report Date"
+    ]]).setFontWeight("bold");
+    Logger.log('✅ Raw Data sheet created');
+  }
+  
+  // Format dates for Gmail search: YYYY/MM/DD
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const gmailDateStr = `${year}/${month}/${day}`;
+  
+  // Get next day for before: parameter
+  const nextDay = new Date(date);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const nextYear = nextDay.getFullYear();
+  const nextMonth = String(nextDay.getMonth() + 1).padStart(2, '0');
+  const nextDayNum = String(nextDay.getDate()).padStart(2, '0');
+  const gmailNextDate = `${nextYear}/${nextMonth}/${nextDayNum}`;
+  
+  const searchQuery = `subject:"BKCM360 Global QA Check" after:${gmailDateStr} before:${gmailNextDate} has:attachment`;
+  
+  Logger.log(`📧 Searching Gmail: ${searchQuery}`);
   const threads = GmailApp.search(searchQuery);
   
   if (threads.length === 0) {
     return {
       success: false,
-      error: `No emails found for ${dateStr}. Check if emails exist with subject "BKCM360 Global QA Check".`
+      error: `No emails found for ${gmailDateStr}. Check if emails exist with subject "BKCM360 Global QA Check".`
     };
   }
   
@@ -6441,17 +6662,17 @@ function downloadRawDataForDate_(dateStr) {
         if (lowerFilename.endsWith('.csv')) {
           try {
             const content = attachment.getDataAsString();
-            const networkId = extractNetworkId(filename);
+            const networkId = filename.split('_')[0]; // Extract NetworkID from filename
             const rows = processCSV(content, networkId);
             
             if (rows.length > 0) {
               rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
               currentRow += rows.length;
               filesProcessed++;
-              Logger.log(`Processed: ${filename} (${rows.length} rows)`);
+              Logger.log(`  ✅ ${filename} (${rows.length} rows)`);
             }
           } catch (error) {
-            Logger.log(`Error processing ${filename}: ${error}`);
+            Logger.log(`  ❌ Error processing ${filename}: ${error}`);
           }
         } else if (lowerFilename.endsWith('.zip')) {
           try {
@@ -6462,19 +6683,19 @@ function downloadRawDataForDate_(dateStr) {
               const unzippedName = file.getName().toLowerCase();
               if (unzippedName.endsWith('.csv')) {
                 const content = file.getDataAsString();
-                const networkId = extractNetworkId(file.getName());
+                const networkId = file.getName().split('_')[0];
                 const rows = processCSV(content, networkId);
                 
                 if (rows.length > 0) {
                   rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
                   currentRow += rows.length;
                   filesProcessed++;
-                  Logger.log(`Processed from ZIP: ${file.getName()} (${rows.length} rows)`);
+                  Logger.log(`  ✅ (ZIP) ${file.getName()} (${rows.length} rows)`);
                 }
               }
             }
           } catch (error) {
-            Logger.log(`Error processing ZIP ${filename}: ${error}`);
+            Logger.log(`  ❌ Error processing ZIP ${filename}: ${error}`);
           }
         }
       }
@@ -6490,7 +6711,8 @@ function downloadRawDataForDate_(dateStr) {
   
   return {
     success: true,
-    filesProcessed: filesProcessed
+    filesProcessed: filesProcessed,
+    source: 'Gmail'
   };
 }
 
@@ -6671,12 +6893,8 @@ function setupGapFillProgressSheet() {
   
   sheet.setFrozenRows(1);
   
-  SpreadsheetApp.getUi().alert(
-    '� Gap Fill Progress Sheet Ready',
-    'Progress tracking sheet created!\n\n' +
-    'Run "Start Auto Gap Fill" to begin processing missing violations reports.',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
+  Logger.log('Gap Fill Progress sheet created successfully');
+  // No notification - called internally during automation
 }
 
 /**
@@ -6687,6 +6905,7 @@ function getMissingDatesFromAudit_() {
   const auditSheet = ss.getSheetByName("Violations Audit");
   
   if (!auditSheet || auditSheet.getLastRow() < 2) {
+    Logger.log('No Violations Audit sheet found or sheet is empty');
     return [];
   }
   
@@ -6694,19 +6913,23 @@ function getMissingDatesFromAudit_() {
   const missingDates = [];
   const startDate = new Date('2025-04-14');
   
+  Logger.log(`Scanning ${data.length} rows in Violations Audit`);
+  
   for (const row of data) {
-    const dateStr = row[0];
-    const status = row[1];
+    const dateStr = String(row[0]);
+    const status = String(row[1]).trim();
     
-    if (status === '�� MISSING' && dateStr) {
+    // Check for MISSING status (handle different formats)
+    if (status.includes('MISSING') && dateStr) {
       const checkDate = new Date(dateStr);
       // Skip dates before 4.14.25 - no data exists
       if (checkDate >= startDate) {
-        missingDates.push(String(dateStr));
+        missingDates.push(dateStr);
       }
     }
   }
   
+  Logger.log(`Found ${missingDates.length} missing dates`);
   return missingDates;
 }
 
@@ -7393,20 +7616,29 @@ function getMissingRawDataFromAudit_() {
   const skipped = { beforeStart: 0, afterEnd: 0, total: 0 };
   const byNetwork = {}; // Track gaps per network
   
-  // Find where data starts (dates are stored as Date objects)
-  let startRow = 0;
-  for (let i = 0; i < data.length; i++) {
-    const cellValue = data[i][0];
-    if (cellValue instanceof Date && !isNaN(cellValue)) {
-      startRow = i;
-      Logger.log(`Found data starting at row ${i}`);
-      break;
-    }
+  // Find where data starts (skip header row)
+  let startRow = 1; // Start at row 1 (0-based), which is row 2 in sheet
+  
+  // Verify we have actual date data
+  if (data.length < 2) {
+    Logger.log(`Not enough data rows. Total rows: ${data.length}`);
+    return [];
   }
   
-  if (startRow === 0) {
-    Logger.log(`Could not find date data in getMissingRawDataFromAudit_. Total rows: ${data.length}`);
-    return [];
+  // Check if row 1 (index 1) has a date
+  const firstDataRow = data[1];
+  if (!(firstDataRow[0] instanceof Date) || isNaN(firstDataRow[0])) {
+    Logger.log(`Row 2 (index 1) doesn't contain a valid date. Value: ${firstDataRow[0]}`);
+    // Try to find first date row
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] instanceof Date && !isNaN(data[i][0])) {
+        startRow = i;
+        Logger.log(`Found data starting at row ${i + 1} (0-based index ${i})`);
+        break;
+      }
+    }
+  } else {
+    Logger.log(`Data starts at row 2 (0-based index 1)`);
   }
 
   // Process data rows
@@ -7418,11 +7650,13 @@ function getMissingRawDataFromAudit_() {
     const status = String(data[i][1] || '').trim();
     const missingNetworks = String(data[i][4] || '').trim();
     
-    // Only process MISSING or PARTIAL statuses
-    if (status === '�� MISSING' || status === '��️ PARTIAL') {
+    Logger.log(`Checking ${dateStr}: Status="${status}", Missing="${missingNetworks}"`);
+    
+    // Only process MISSING or PARTIAL statuses (handle emoji variations)
+    if (status.includes('MISSING') || status.includes('PARTIAL')) {
       let networksList = [];
       
-      if (status === '�� MISSING') {
+      if (status.includes('MISSING')) {
         // Get all networks for this date
         const networksSheet = ss.getSheetByName("Networks");
         if (networksSheet) {
@@ -7432,9 +7666,13 @@ function getMissingRawDataFromAudit_() {
             if (netId) networksList.push(netId);
           }
         }
-      } else if (status === '��️ PARTIAL' && missingNetworks && missingNetworks !== '��') {
-        // Parse missing networks from column
-        networksList = missingNetworks.split(',').map(n => n.trim()).filter(n => n && n !== '��');
+      } else if (status.includes('PARTIAL') && missingNetworks) {
+        // Parse missing networks from column E (index 4)
+        // Handle comma-separated or space-separated values
+        networksList = missingNetworks
+          .split(/[,\s]+/)
+          .map(n => n.trim())
+          .filter(n => n && n !== '✓' && !n.includes('✓'));
       }
       
       // Filter networks based on lifecycle
@@ -7490,6 +7728,7 @@ function getMissingRawDataFromAudit_() {
 
 /**
  * Update Audit Dashboard Notes column (Column G)
+ * Now accumulates messages per date instead of overwriting
  */
 function updateRawDataAuditNotes_(dateStr, message) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -7512,9 +7751,20 @@ function updateRawDataAuditNotes_(dateStr, message) {
     
     if (cellDateStr === dateStr) {
       // Column G = index 6 (0-based), row is i+1 (1-based)
-      sheet.getRange(i + 1, 7).setValue(message);
-      SpreadsheetApp.flush(); // Force immediate update
-      break;
+      const currentNote = String(sheet.getRange(i + 1, 7).getValue() || '').trim();
+      
+      // Don't append duplicates or "Processing..." messages
+      if (message.includes('Processing network')) {
+        // Temporary status - overwrite
+        sheet.getRange(i + 1, 7).setValue(message);
+      } else if (!currentNote || currentNote.includes('Processing network')) {
+        // First real result or replacing temp status - overwrite
+        sheet.getRange(i + 1, 7).setValue(message);
+      } else {
+        // Append to existing (multiple networks per date)
+        sheet.getRange(i + 1, 7).setValue(currentNote + ' | ' + message);
+      }
+      break; // Don't flush here - let batch updates happen
     }
   }
 }
@@ -7529,8 +7779,22 @@ function getRawGapFillState_() {
 }
 
 function saveRawGapFillState_(state) {
-  const props = PropertiesService.getDocumentProperties();
-  props.setProperty(RAW_GAP_FILL_STATE_KEY, JSON.stringify(state));
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    const stateJson = JSON.stringify(state);
+    
+    // Check size before saving (9KB limit = ~9000 chars)
+    if (stateJson.length > 8500) {
+      Logger.log(`⚠️ WARNING: State size (${stateJson.length} chars) approaching 9KB limit!`);
+      // Consider chunking or cleanup if this happens
+    }
+    
+    props.setProperty(RAW_GAP_FILL_STATE_KEY, stateJson);
+  } catch (e) {
+    Logger.log(`❌ ERROR saving raw gap fill state: ${e.message}`);
+    Logger.log(`State size: ${JSON.stringify(state).length} characters`);
+    throw new Error(`Failed to save gap fill state: ${e.message}`);
+  }
 }
 
 function clearRawGapFillState_() {
@@ -7563,7 +7827,7 @@ function downloadRawDataForDateNetwork_(dateStr, networkId) {
     const afterStr = Utilities.formatDate(dayBefore, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     const beforeStr = Utilities.formatDate(dayAfter, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     
-    const fullQuery = `subject:"BKCM360 Global QA Check" has:attachment after:${afterStr} before:${beforeStr}`;
+    const fullQuery = `subject:"CM360 CPC/CPM FLIGHT QA" has:attachment after:${afterStr} before:${beforeStr}`;
     
     Logger.log(`Searching for ${dateStr} (${filenameDateStr}): ${fullQuery}`);
     
@@ -7861,7 +8125,7 @@ function processRawDataGapFillChunk_() {
     }
     
     // Don't show alert if trigger is active
-    const triggerId = PropertiesService.getScriptProperties().getProperty(RAW_GAP_FILL_TRIGGER_KEY);
+    const triggerId = PropertiesService.getDocumentProperties().getProperty(RAW_GAP_FILL_TRIGGER_KEY);
     if (!triggerId) {
       SpreadsheetApp.getUi().alert(
         '⏸️ Gap Fill Paused',
@@ -7878,8 +8142,20 @@ function processRawDataGapFillChunk_() {
   const queue = state.queue;
   let processedThisRun = 0;
   let emailsThisRun = 0;
+  let currentDateResults = {}; // Track results per date for batching
   
   while (state.currentIndex < queue.length) {
+    // Re-check quota key in case midnight passed mid-run
+    const currentToday = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    if (currentToday !== today) {
+      Logger.log(`🕐 Midnight passed! Quota reset. Old: ${today}, New: ${currentToday}`);
+      // Update quota counter with current run, then exit to pick up fresh quota next run
+      docProps.setProperty(quotaKey, String(dailyEmailCount + emailsThisRun));
+      saveRawGapFillState_(state);
+      Logger.log(`Saved state and exiting to leverage fresh daily quota`);
+      return;
+    }
+    
     // Check time budget
     if ((Date.now() - startTime) >= RAW_GAP_FILL_TIME_BUDGET_MS) {
       Logger.log(`⏱️ Time budget reached. Processed ${state.processed}/${queue.length}`);
@@ -7890,7 +8166,7 @@ function processRawDataGapFillChunk_() {
       Logger.log(`📧 Chunk complete - Emails this run: ${emailsThisRun}, Daily total: ${dailyEmailCount + emailsThisRun}`);
       
       // Don't show alert if trigger is active (silent resume)
-      const props = PropertiesService.getScriptProperties();
+      const props = PropertiesService.getDocumentProperties();
       const triggerId = props.getProperty(RAW_GAP_FILL_TRIGGER_KEY);
       
       if (!triggerId) {
@@ -7919,7 +8195,7 @@ function processRawDataGapFillChunk_() {
       saveRawGapFillState_(state);
       docProps.setProperty(quotaKey, String(dailyEmailCount + emailsThisRun));
       
-      const triggerId = PropertiesService.getScriptProperties().getProperty(RAW_GAP_FILL_TRIGGER_KEY);
+      const triggerId = PropertiesService.getDocumentProperties().getProperty(RAW_GAP_FILL_TRIGGER_KEY);
       if (!triggerId) {
         SpreadsheetApp.getUi().alert(
           '📧 Gmail Quota Limit',
@@ -7939,27 +8215,61 @@ function processRawDataGapFillChunk_() {
     const networkId = item.network;
     
     Logger.log(`Processing [${state.currentIndex + 1}/${queue.length}]: ${dateStr} / ${networkId}`);
-    updateRawDataAuditNotes_(dateStr, `🔍 Processing network ${networkId}...`);
+    
+    // Only show processing message if this is the first network for this date
+    if (!currentDateResults[dateStr]) {
+      currentDateResults[dateStr] = [];
+      updateRawDataAuditNotes_(dateStr, `🔍 Processing network ${networkId}...`);
+    }
     
     // Try to download from Gmail
     const result = downloadRawDataForDateNetwork_(dateStr, networkId);
     emailsThisRun++; // Count Gmail search
     
+    // Accumulate result for this date
+    currentDateResults[dateStr].push({
+      networkId,
+      success: result.success,
+      filesFound: result.filesFound,
+      details: result.details
+    });
+    
     if (result.success) {
       item.status = 'success';
       state.successful++;
-      updateRawDataAuditNotes_(dateStr, result.details);
       Logger.log(`✅ Success: ${dateStr} / ${networkId} - ${result.filesFound} files`);
     } else {
       item.status = 'failed';
       state.failed++;
-      updateRawDataAuditNotes_(dateStr, result.details);
       Logger.log(`❌ Failed: ${dateStr} / ${networkId} - ${result.errorMsg}`);
     }
     
     state.processed++;
     state.currentIndex++;
     processedThisRun++;
+    
+    // Check if we've finished all networks for this date
+    const nextItem = queue[state.currentIndex];
+    const dateChanged = !nextItem || nextItem.date !== dateStr;
+    
+    if (dateChanged && currentDateResults[dateStr]) {
+      // Build combined message for this date
+      const results = currentDateResults[dateStr];
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+      
+      let summary = [];
+      if (successful.length > 0) {
+        const totalFiles = successful.reduce((sum, r) => sum + r.filesFound, 0);
+        summary.push(`✅ ${successful.length} network${successful.length > 1 ? 's' : ''} (${totalFiles} file${totalFiles > 1 ? 's' : ''})`);
+      }
+      if (failed.length > 0) {
+        summary.push(`❌ ${failed.length} failed: ${failed.map(r => r.networkId).join(', ')}`);
+      }
+      
+      updateRawDataAuditNotes_(dateStr, summary.join(' | '));
+      delete currentDateResults[dateStr]; // Clean up
+    }
     
     // Save state every 5 items
     if (state.processed % 5 === 0) {
@@ -8053,11 +8363,11 @@ function createRawGapFillAutoResumeTrigger() {
     .everyMinutes(10)
     .create();
   
-  const props = PropertiesService.getScriptProperties();
+  const props = PropertiesService.getDocumentProperties(); // Changed from ScriptProperties
   props.setProperty(RAW_GAP_FILL_TRIGGER_KEY, trigger.getUniqueId());
   
   SpreadsheetApp.getUi().alert(
-    '� Auto-Resume Trigger Created',
+    '✅ Auto-Resume Trigger Created',
     'Raw data gap fill will automatically resume every 10 minutes.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
@@ -8067,7 +8377,7 @@ function createRawGapFillAutoResumeTrigger() {
  * Delete Raw Data Gap Fill Auto-Resume Trigger
  */
 function deleteRawGapFillAutoResumeTrigger_() {
-  const props = PropertiesService.getScriptProperties();
+  const props = PropertiesService.getDocumentProperties(); // Changed from ScriptProperties
   const triggerId = props.getProperty(RAW_GAP_FILL_TRIGGER_KEY);
   
   if (triggerId) {
@@ -8112,12 +8422,3827 @@ function stopRawDataGapFillAndDeleteTrigger() {
 }
 
 // =====================================================================================================================
+// ================================ RAW DATA GAP FILL (TEST MODE - 2 PHASE SYSTEM) ==================================
+// =====================================================================================================================
+
+/**
+ * Setup Test Audit Dashboard sheet
+ */
+function setupTestAuditDashboard_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Audit Dashboard (TEST)");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("Audit Dashboard (TEST)");
+    
+    // Set up columns
+    sheet.setColumnWidth(1, 120); // Date
+    sheet.setColumnWidth(2, 100); // Phase 1 Status
+    sheet.setColumnWidth(3, 150); // Files Downloaded
+    sheet.setColumnWidth(4, 100); // Phase 2 Status
+    sheet.setColumnWidth(5, 150); // ZIPs Extracted
+    sheet.setColumnWidth(6, 300); // Notes
+    
+    // Headers
+    const headers = [
+      ["Date", "Phase 1 Status", "Files Downloaded", "Phase 2 Status", "ZIPs Extracted", "Notes"]
+    ];
+    
+    sheet.getRange(1, 1, 1, 6).setValues(headers)
+      .setFontWeight("bold")
+      .setBackground("#4285f4")
+      .setFontColor("#ffffff");
+  }
+  
+  return sheet;
+}
+
+/**
+ * Phase 1: Download all attachments for date range
+ */
+function startTestPhase1Download() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Setup dashboard
+  setupTestAuditDashboard_();
+  
+  // Check for existing state
+  const existingState = getTestPhase1State_();
+  if (existingState && existingState.status === 'running') {
+    const response = ui.alert(
+      '⚠️ Phase 1 In Progress',
+      'Phase 1 download is already running.\n\nContinue from where it left off?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      processTestPhase1Chunk_();
+      return;
+    } else {
+      return;
+    }
+  }
+  
+  // Show calendar picker
+  const dateRange = showTestDateRangePicker_();
+  if (!dateRange) return;
+  
+  const startDate = dateRange.startDate;
+  const endDate = dateRange.endDate;
+  
+  // Build date queue
+  const queue = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    queue.push({
+      date: dateStr,
+      status: 'pending',
+      filesDownloaded: 0,
+      csvCount: 0,
+      zipCount: 0
+    });
+  }
+  
+  // Initialize state
+  const state = {
+    status: 'running',
+    queue: queue,
+    currentIndex: 0,
+    startTime: new Date().toISOString(),
+    startDate: startDate,
+    endDate: endDate,
+    processed: 0,
+    totalFiles: 0,
+    totalCSVs: 0,
+    totalZIPs: 0
+  };
+  
+  saveTestPhase1State_(state);
+  
+  ui.alert(
+    '▶️ Phase 1 Starting',
+    `Will download all attachments from ${startDate} to ${endDate}\n\n` +
+    `Total dates: ${queue.length}\n\n` +
+    `Create auto-resume trigger for automatic processing?`,
+    ui.ButtonSet.OK
+  );
+  
+  // Start processing
+  processTestPhase1Chunk_();
+}
+
+/**
+ * Process Phase 1 chunk (download attachments)
+ */
+function processTestPhase1Chunk_() {
+  const startTime = Date.now();
+  const state = getTestPhase1State_();
+  
+  if (!state || state.status !== 'running') {
+    Logger.log('Phase 1 not running');
+    return;
+  }
+  
+  const TIME_BUDGET_MS = 5.5 * 60 * 1000;
+  const queue = state.queue;
+  
+  // Initialize daily stats tracking
+  const dailyStats = getTodayStats_();
+  
+  while (state.currentIndex < queue.length) {
+    // Check time budget
+    if ((Date.now() - startTime) >= TIME_BUDGET_MS) {
+      Logger.log(`⏱️ Time budget reached`);
+      saveTestPhase1State_(state);
+      saveTodayStats_(dailyStats);
+      return;
+    }
+    
+    const item = queue[state.currentIndex];
+    const dateStr = item.date;
+    
+    Logger.log(`Processing [${state.currentIndex + 1}/${queue.length}]: ${dateStr}`);
+    updateTestPhase1Note_(dateStr, `🔍 Downloading...`);
+    
+    // Try to download - catch quota errors
+    let result;
+    try {
+      result = downloadAllAttachmentsForDate_(dateStr);
+      
+      // Only count Gmail search if not skipped
+      if (!result.skipped) {
+        dailyStats.gmailSearches++;
+      }
+      
+      // Clear any previous pause message
+      if (item.status === 'paused') {
+        item.status = 'pending';
+      }
+      
+    } catch (e) {
+      const errorMsg = String(e.message || e);
+      
+      // Check for Gmail quota error
+      if (errorMsg.includes('Service invoked too many times') || 
+          errorMsg.includes('quota') || 
+          errorMsg.includes('rate limit')) {
+        Logger.log(`⚠️ Gmail quota exceeded: ${errorMsg}`);
+        updateTestPhase1Note_(dateStr, '⏸️ Paused: Gmail quota exceeded');
+        item.status = 'paused';
+        saveTestPhase1State_(state);
+        saveTodayStats_(dailyStats);
+        return; // Exit and wait for next trigger
+      } else {
+        // Other error - log and skip this date
+        Logger.log(`❌ Error processing ${dateStr}: ${errorMsg}`);
+        updateTestPhase1Note_(dateStr, `❌ Error: ${errorMsg}`);
+        item.status = 'error';
+        state.currentIndex++;
+        saveTestPhase1State_(state);
+        continue;
+      }
+    }
+    
+    // Success - update stats
+    item.status = 'completed';
+    item.filesDownloaded = result.totalFiles;
+    item.csvCount = result.csvsSaved;
+    item.zipCount = result.zipsSaved;
+    
+    state.totalFiles += result.totalFiles;
+    state.totalCSVs += result.csvsSaved;
+    state.totalZIPs += result.zipsSaved;
+    state.processed++;
+    
+    // Track daily progress (only if not skipped)
+    if (!result.skipped) {
+      dailyStats.csvsSaved += result.csvsSaved;
+      dailyStats.zipsSaved += result.zipsSaved;
+      dailyStats.datesCompleted.push(dateStr);
+    }
+    
+    state.currentIndex++;
+    
+    // Update note based on whether skipped or downloaded
+    if (result.skipped) {
+      updateTestPhase1Note_(dateStr, `⏭️ Skipped (already has ${result.totalFiles} files: ${result.csvsSaved} CSVs, ${result.zipsSaved} ZIPs)`);
+    } else {
+      updateTestPhase1Note_(dateStr, `✅ Downloaded ${result.totalFiles} files (${result.csvsSaved} CSVs, ${result.zipsSaved} ZIPs)`);
+    }
+    
+    // Save state after each date
+    saveTestPhase1State_(state);
+    saveTodayStats_(dailyStats);
+    
+    Utilities.sleep(result.skipped ? 50 : 100); // Faster for skipped dates
+  }
+  
+  // All done - Phase 1 complete!
+  state.status = 'completed';
+  state.endTime = new Date().toISOString();
+  saveTestPhase1State_(state);
+  saveTodayStats_(dailyStats);
+  
+  Logger.log(`✅ Phase 1 Complete! Files: ${state.totalFiles}, CSVs: ${state.totalCSVs}, ZIPs: ${state.totalZIPs}`);
+  
+  // Send immediate completion email
+  sendPhase1CompletionEmail_(state);
+  
+  // Stop auto-trigger
+  const props = PropertiesService.getDocumentProperties();
+  const triggerId = props.getProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  if (triggerId) {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getUniqueId() === triggerId) {
+        ScriptApp.deleteTrigger(trigger);
+        Logger.log('✅ Auto-trigger stopped');
+        break;
+      }
+    }
+    props.deleteProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  }
+}
+
+/**
+ * Download all attachments for a specific date
+ */
+function downloadAllAttachmentsForDate_(dateStr) {
+  // Check if this date already has files downloaded (skip if so)
+  const existingFiles = checkExistingFilesForDate_(dateStr);
+  if (existingFiles.hasFiles) {
+    Logger.log(`  ⏭️ Skipping ${dateStr} - already has ${existingFiles.csvCount} CSVs and ${existingFiles.zipCount} ZIPs`);
+    return { 
+      totalFiles: existingFiles.csvCount + existingFiles.zipCount, 
+      csvsSaved: existingFiles.csvCount, 
+      zipsSaved: existingFiles.zipCount,
+      skipped: true
+    };
+  }
+  
+  // Parse date string: "2025-06-15" → year, month, day
+  const dateParts = dateStr.split('-');
+  const year = parseInt(dateParts[0], 10);
+  const month = parseInt(dateParts[1], 10);
+  const day = parseInt(dateParts[2], 10);
+  
+  // Build Gmail search dates - use YYYY/MM/DD format (matches Google's date format exactly)
+  // Gmail's after: includes the specified date and all days after
+  // Gmail's before: excludes the specified date (stops before it)
+  // To get ONLY the target date, we need: after:(target) before:(target+1)
+  
+  const afterDate = `${year}/${month}/${day}`;
+  
+  // Calculate next day using string manipulation instead of Date object
+  let nextYear = year;
+  let nextMonth = month;
+  let nextDay = day + 1;
+  
+  // Handle month/year rollover
+  const daysInMonth = new Date(year, month, 0).getDate(); // Get days in current month
+  if (nextDay > daysInMonth) {
+    nextDay = 1;
+    nextMonth++;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear++;
+    }
+  }
+  
+  const beforeDate = `${nextYear}/${nextMonth}/${nextDay}`;
+  
+  // Use exact production search format (lowercase label, hyphen, after/before)
+  const query = `label:cm360-qa subject:"CM360 CPC/CPM FLIGHT QA" after:${afterDate} before:${beforeDate}`;
+  Logger.log(`Gmail search: ${query}`);
+  
+  let threads;
+  try {
+    threads = GmailApp.search(query, 0, 50);
+    Logger.log(`  Found ${threads.length} threads for ${dateStr}`);
+  } catch (e) {
+    Logger.log(`  Gmail search error: ${e.message}`);
+    throw e;
+  }
+  
+  let csvsSaved = 0;
+  let zipsSaved = 0;
+  
+  if (threads.length === 0) {
+    Logger.log(`  No emails found for ${dateStr}`);
+    return { totalFiles: 0, csvsSaved: 0, zipsSaved: 0, skipped: false };
+  }
+  
+  // Get/create date folder
+  const dateFolder = getOrCreateTestDateFolder_(dateStr);
+  
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    
+    for (const message of messages) {
+      const attachments = message.getAttachments();
+      
+      for (const attachment of attachments) {
+        const filename = attachment.getName();
+        const lowerFilename = filename.toLowerCase();
+        
+        if (lowerFilename.endsWith('.csv') || lowerFilename.endsWith('.zip')) {
+          // Check if file already exists
+          const existingFiles = dateFolder.getFilesByName(filename);
+          if (existingFiles.hasNext()) {
+            Logger.log(`  Skipping ${filename} (already exists)`);
+            continue;
+          }
+          
+          // Save file as-is (no processing)
+          dateFolder.createFile(attachment.copyBlob().setName(filename));
+          
+          if (lowerFilename.endsWith('.csv')) {
+            csvsSaved++;
+            Logger.log(`  ✅ Saved CSV: ${filename}`);
+          } else if (lowerFilename.endsWith('.zip')) {
+            zipsSaved++;
+            Logger.log(`  📦 Saved ZIP: ${filename}`);
+          }
+        }
+      }
+    }
+  }
+  
+  return { 
+    totalFiles: csvsSaved + zipsSaved, 
+    csvsSaved: csvsSaved, 
+    zipsSaved: zipsSaved 
+  };
+}
+
+/**
+ * Check if a date already has files downloaded in Drive
+ */
+function checkExistingFilesForDate_(dateStr) {
+  try {
+    const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+    const dateParts = dateStr.split('-');
+    const year = dateParts[0];
+    const month = dateParts[1];
+    
+    const monthNames = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+    const monthName = `${month}-${monthNames[parseInt(month, 10)]}`;
+    
+    // Try to find year folder
+    const yearFolders = rootFolder.getFoldersByName(year);
+    if (!yearFolders.hasNext()) {
+      return { hasFiles: false, csvCount: 0, zipCount: 0 };
+    }
+    const yearFolder = yearFolders.next();
+    
+    // Try to find month folder
+    const monthFolders = yearFolder.getFoldersByName(monthName);
+    if (!monthFolders.hasNext()) {
+      return { hasFiles: false, csvCount: 0, zipCount: 0 };
+    }
+    const monthFolder = monthFolders.next();
+    
+    // Try to find date folder
+    const dateFolders = monthFolder.getFoldersByName(dateStr);
+    if (!dateFolders.hasNext()) {
+      return { hasFiles: false, csvCount: 0, zipCount: 0 };
+    }
+    const dateFolder = dateFolders.next();
+    
+    // Count CSV and ZIP files
+    let csvCount = 0;
+    let zipCount = 0;
+    
+    const csvFiles = dateFolder.getFilesByType(MimeType.CSV);
+    while (csvFiles.hasNext()) {
+      csvFiles.next();
+      csvCount++;
+    }
+    
+    const zipFiles = dateFolder.getFilesByType(MimeType.ZIP);
+    while (zipFiles.hasNext()) {
+      zipFiles.next();
+      zipCount++;
+    }
+    
+    const totalFiles = csvCount + zipCount;
+    
+    return {
+      hasFiles: totalFiles > 0,
+      csvCount: csvCount,
+      zipCount: zipCount
+    };
+    
+  } catch (e) {
+    Logger.log(`Error checking existing files for ${dateStr}: ${e.message}`);
+    return { hasFiles: false, csvCount: 0, zipCount: 0 };
+  }
+}
+
+/**
+ * Get or create date folder in TEST directory
+ */
+function getOrCreateTestDateFolder_(dateStr) {
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+  const dateParts = dateStr.split('-');
+  const year = dateParts[0];
+  const month = dateParts[1];
+  
+  const monthNames = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+  const monthName = `${month}-${monthNames[parseInt(month, 10)]}`;
+  
+  // Get/create year folder
+  let yearFolder;
+  const yearFolders = rootFolder.getFoldersByName(year);
+  if (yearFolders.hasNext()) {
+    yearFolder = yearFolders.next();
+  } else {
+    yearFolder = rootFolder.createFolder(year);
+  }
+  
+  // Get/create month folder
+  let monthFolder;
+  const monthFolders = yearFolder.getFoldersByName(monthName);
+  if (monthFolders.hasNext()) {
+    monthFolder = monthFolders.next();
+  } else {
+    monthFolder = yearFolder.createFolder(monthName);
+  }
+  
+  // Get/create date folder
+  let dateFolder;
+  const dateFolders = monthFolder.getFoldersByName(dateStr);
+  if (dateFolders.hasNext()) {
+    dateFolder = dateFolders.next();
+  } else {
+    dateFolder = monthFolder.createFolder(dateStr);
+  }
+  
+  return dateFolder;
+}
+
+/**
+ * Show calendar date range picker using HTML dialog
+ */
+function showTestDateRangePicker_() {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <base target="_top">
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+          }
+          .container {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 500px;
+            margin: 0 auto;
+          }
+          h2 {
+            color: #1a73e8;
+            margin-top: 0;
+            font-size: 20px;
+          }
+          .date-group {
+            margin: 20px 0;
+          }
+          label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #333;
+          }
+          input[type="date"] {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #dadce0;
+            border-radius: 4px;
+            box-sizing: border-box;
+          }
+          input[type="date"]:focus {
+            outline: none;
+            border-color: #1a73e8;
+          }
+          .button-group {
+            margin-top: 25px;
+            text-align: right;
+          }
+          button {
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 10px;
+          }
+          .cancel-btn {
+            background: #f1f3f4;
+            color: #5f6368;
+          }
+          .cancel-btn:hover {
+            background: #e8eaed;
+          }
+          .submit-btn {
+            background: #1a73e8;
+            color: white;
+          }
+          .submit-btn:hover {
+            background: #1557b0;
+          }
+          .info {
+            background: #e8f0fe;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 15px;
+            font-size: 13px;
+            color: #1967d2;
+          }
+          .error {
+            background: #fce8e6;
+            color: #c5221f;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h2>📅 Select Date Range</h2>
+          
+          <div class="date-group">
+            <label for="startDate">Start Date:</label>
+            <input type="date" id="startDate" required>
+          </div>
+          
+          <div class="date-group">
+            <label for="endDate">End Date:</label>
+            <input type="date" id="endDate" required>
+          </div>
+          
+          <div class="info">
+            💡 Select the date range for downloading raw data attachments from Gmail.
+          </div>
+          
+          <div class="error" id="error"></div>
+          
+          <div class="button-group">
+            <button class="cancel-btn" onclick="google.script.host.close()">Cancel</button>
+            <button class="submit-btn" onclick="submitDates()">Continue</button>
+          </div>
+        </div>
+        
+        <script>
+          // Set default dates (last 7 days)
+          window.onload = function() {
+            const today = new Date();
+            const weekAgo = new Date();
+            weekAgo.setDate(today.getDate() - 7);
+            
+            document.getElementById('endDate').valueAsDate = today;
+            document.getElementById('startDate').valueAsDate = weekAgo;
+          };
+          
+          function submitDates() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const errorDiv = document.getElementById('error');
+            
+            if (!startDate || !endDate) {
+              errorDiv.textContent = 'Please select both start and end dates.';
+              errorDiv.style.display = 'block';
+              return;
+            }
+            
+            if (new Date(startDate) > new Date(endDate)) {
+              errorDiv.textContent = 'Start date must be before or equal to end date.';
+              errorDiv.style.display = 'block';
+              return;
+            }
+            
+            // Return dates to Apps Script
+            google.script.run
+              .withSuccessHandler(function() {
+                google.script.host.close();
+              })
+              .setTestDateRange(startDate, endDate);
+          }
+        </script>
+      </body>
+    </html>
+  `;
+  
+  const htmlOutput = HtmlService.createHtmlOutput(html)
+    .setWidth(550)
+    .setHeight(420);
+  
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Select Date Range');
+  
+  // Wait for user input (handled by setTestDateRange callback)
+  return null; // Will be set by callback
+}
+
+/**
+ * Callback to receive date range from calendar picker
+ */
+function setTestDateRange(startDate, endDate) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty('TEST_DATE_RANGE_START', startDate);
+  props.setProperty('TEST_DATE_RANGE_END', endDate);
+  
+  // Trigger the actual download process
+  continueTestPhase1WithDates_();
+}
+
+/**
+ * Continue Phase 1 download with selected dates
+ */
+function continueTestPhase1WithDates_() {
+  const props = PropertiesService.getDocumentProperties();
+  const startDate = props.getProperty('TEST_DATE_RANGE_START');
+  const endDate = props.getProperty('TEST_DATE_RANGE_END');
+  
+  if (!startDate || !endDate) {
+    Logger.log('No dates selected');
+    return;
+  }
+  
+  // Clear temp properties
+  props.deleteProperty('TEST_DATE_RANGE_START');
+  props.deleteProperty('TEST_DATE_RANGE_END');
+  
+  // Build date queue
+  const queue = [];
+  
+  // Parse dates manually to avoid timezone issues
+  // Input format: "2025-12-05"
+  const startParts = startDate.split('-');
+  const endParts = endDate.split('-');
+  
+  const start = new Date(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2]), 12, 0, 0); // Noon local time
+  const end = new Date(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2]), 12, 0, 0);
+  
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    queue.push({
+      date: dateStr,
+      status: 'pending',
+      filesDownloaded: 0,
+      csvCount: 0,
+      zipCount: 0
+    });
+  }
+  
+  // Initialize state
+  const state = {
+    status: 'running',
+    queue: queue,
+    currentIndex: 0,
+    startTime: new Date().toISOString(),
+    startDate: startDate,
+    endDate: endDate,
+    processed: 0,
+    totalFiles: 0,
+    totalCSVs: 0,
+    totalZIPs: 0
+  };
+  
+  saveTestPhase1State_(state);
+  
+  SpreadsheetApp.getUi().alert(
+    '▶️ Phase 1 Starting',
+    `Will download all attachments from ${startDate} to ${endDate}\n\n` +
+    `Total dates: ${queue.length}\n\n` +
+    `Processing will begin now. You can create an auto-resume trigger if needed.`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  
+  // Start processing
+  processTestPhase1Chunk_();
+}
+
+/**
+ * Phase 2: Extract all ZIPs in TEST folder
+ */
+function startTestPhase2Extraction() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Ask user for scope
+  const scopeResponse = ui.alert(
+    '📦 Select Extraction Scope',
+    'Choose scope:\n\n' +
+    'YES = Extract all ZIPs (full folder)\n' +
+    'NO = Select specific month(s)\n' +
+    'CANCEL = Exit',
+    ui.ButtonSet.YES_NO_CANCEL
+  );
+  
+  if (scopeResponse === ui.Button.CANCEL) return;
+  
+  let monthFilter = null; // null = all months
+  
+  if (scopeResponse === ui.Button.NO) {
+    // Ask which month(s) to extract
+    const monthInput = ui.prompt(
+      '📅 Select Month(s)',
+      'Enter month(s) to extract ZIPs from:\n\n' +
+      'Examples:\n' +
+      '  "4" = April only\n' +
+      '  "6-8" = June through August\n' +
+      '  "4,6,9" = April, June, September\n\n' +
+      'Enter month number(s):',
+      ui.ButtonSet.OK_CANCEL
+    );
+    
+    if (monthInput.getSelectedButton() !== ui.Button.OK) return;
+    
+    const input = monthInput.getResponseText().trim();
+    monthFilter = parseMonthFilter_(input);
+    
+    if (!monthFilter) {
+      ui.alert('❌ Invalid Input', 'Could not parse month selection. Please try again.', ui.ButtonSet.OK);
+      return;
+    }
+  }
+  
+  const scopeMsg = monthFilter 
+    ? `Month(s): ${monthFilter.join(', ')}`
+    : 'All months';
+  
+  const confirmMsg = 
+    `📦 Phase 2: ZIP Extraction\n\n` +
+    `Scope: ${scopeMsg}\n\n` +
+    `This will:\n` +
+    `1. Scan for ZIP files\n` +
+    `2. Extract CSVs from each ZIP\n` +
+    `3. Verify extraction succeeded\n` +
+    `4. Delete ZIP only if verified\n\n` +
+    `Continue?`;
+  
+  const confirm = ui.alert('📦 Confirm Extraction', confirmMsg, ui.ButtonSet.YES_NO);
+  
+  if (confirm !== ui.Button.YES) return;
+  
+  // Count ZIPs (quick scan without storing full list)
+  const zipCount = countZipsInTestFolder_(monthFilter);
+  
+  if (zipCount === 0) {
+    ui.alert('✅ No ZIPs Found', `No ZIP files found in selected scope.\n\nScope: ${scopeMsg}`, ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Initialize lightweight state (no ZIP list stored)
+  const state = {
+    status: 'running',
+    monthFilter: monthFilter,
+    startTime: new Date().toISOString(),
+    processed: 0,
+    successful: 0,
+    failed: 0,
+    csvsExtracted: 0,
+    estimatedTotal: zipCount
+  };
+  
+  saveTestPhase2State_(state);
+  
+  ui.alert(
+    '▶️ Starting ZIP Extraction',
+    `Found ~${zipCount} ZIP files to extract.\n\n` +
+    `Scope: ${scopeMsg}\n\n` +
+    `This will run in chunks with auto-resume.\n` +
+    `Processing on-the-fly (no memory limits).`,
+    ui.ButtonSet.OK
+  );
+  
+  processTestPhase2Chunk_();
+}
+
+/**
+ * Process Phase 2 chunk (extract ZIPs) - ON-THE-FLY SCANNING
+ */
+function processTestPhase2Chunk_() {
+  const startTime = Date.now();
+  const state = getTestPhase2State_();
+  
+  if (!state || state.status !== 'running') {
+    Logger.log('Phase 2 not running');
+    return;
+  }
+  
+  const TIME_BUDGET_MS = 5.5 * 60 * 1000;
+  const BATCH_SIZE = 50; // Process 50 ZIPs per chunk
+  
+  // Scan for ZIPs on-the-fly (don't store in state)
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+  let processedThisRun = 0;
+  let foundAnyZips = false;
+  
+  // Scan year folders
+  const yearFolders = rootFolder.getFolders();
+  while (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    
+    // Scan month folders
+    const monthFolders = yearFolder.getFolders();
+    while (monthFolders.hasNext()) {
+      const monthFolder = monthFolders.next();
+      
+      // Apply month filter if specified
+      if (state.monthFilter) {
+        const monthName = monthFolder.getName();
+        const monthNum = parseInt(monthName.split('-')[0], 10);
+        if (!state.monthFilter.includes(monthNum)) {
+          continue;
+        }
+      }
+      
+      // Scan date folders
+      const dateFolders = monthFolder.getFolders();
+      while (dateFolders.hasNext()) {
+        const dateFolder = dateFolders.next();
+        const dateStr = dateFolder.getName();
+        
+        // Find ZIP files in this date folder
+        const files = dateFolder.getFilesByType(MimeType.ZIP);
+        while (files.hasNext()) {
+          foundAnyZips = true;
+          
+          // Check time budget
+          if ((Date.now() - startTime) >= TIME_BUDGET_MS) {
+            Logger.log(`⏱️ Time budget reached - processed ${processedThisRun} ZIPs this run`);
+            saveTestPhase2State_(state);
+            return;
+          }
+          
+          // Check batch limit
+          if (processedThisRun >= BATCH_SIZE) {
+            Logger.log(`📦 Batch limit reached (${BATCH_SIZE}) - saving and resuming`);
+            saveTestPhase2State_(state);
+            return;
+          }
+          
+          const zipFile = files.next();
+          const zipInfo = {
+            id: zipFile.getId(),
+            name: zipFile.getName(),
+            folderId: dateFolder.getId(),
+            dateStr: dateStr
+          };
+          
+          Logger.log(`Extracting [${state.processed + 1}]: ${zipInfo.name}`);
+          
+          try {
+            const zipBlob = zipFile.getBlob();
+            
+            // Extract files
+            const unzipped = Utilities.unzip(zipBlob);
+            let csvsThisZip = 0;
+            const extractedFiles = [];
+            
+            for (const file of unzipped) {
+              if (file.getName().toLowerCase().endsWith('.csv')) {
+                const createdFile = dateFolder.createFile(file);
+                extractedFiles.push(createdFile.getId());
+                csvsThisZip++;
+              }
+            }
+            
+            // VERIFICATION: Ensure all CSVs were created
+            let allVerified = true;
+            for (const fileId of extractedFiles) {
+              try {
+                DriveApp.getFileById(fileId);
+              } catch (e) {
+                allVerified = false;
+                Logger.log(`  ⚠️ Verification failed for file ID: ${fileId}`);
+                break;
+              }
+            }
+            
+            if (allVerified && csvsThisZip > 0) {
+              // Only delete ZIP if all CSVs verified
+              zipFile.setTrashed(true);
+              
+              state.successful++;
+              state.csvsExtracted += csvsThisZip;
+              Logger.log(`  ✅ Extracted ${csvsThisZip} CSVs, verified, deleted ZIP`);
+              
+              updateTestPhase2Note_(zipInfo.dateStr, `📦 Extracted ${csvsThisZip} CSVs from ${zipInfo.name}`);
+            } else {
+              state.failed++;
+              Logger.log(`  ⚠️ Verification failed or no CSVs - ZIP kept for safety`);
+              updateTestPhase2Note_(zipInfo.dateStr, `⚠️ Extraction issue: ${zipInfo.name} - ZIP preserved`);
+            }
+            
+          } catch (e) {
+            Logger.log(`  ❌ Failed: ${e.message}`);
+            state.failed++;
+            updateTestPhase2Note_(zipInfo.dateStr, `❌ Extraction failed: ${zipInfo.name} - ZIP preserved`);
+          }
+          
+          state.processed++;
+          processedThisRun++;
+          
+          // Save state every 10 ZIPs
+          if (state.processed % 10 === 0) {
+            saveTestPhase2State_(state);
+          }
+        }
+      }
+    }
+  }
+  
+  // If we scanned everything and found no ZIPs, we're done
+  if (!foundAnyZips) {
+    state.status = 'completed';
+    state.endTime = new Date().toISOString();
+    saveTestPhase2State_(state);
+    
+    Logger.log(`✅ Phase 2 Complete! Processed: ${state.processed}, Successful: ${state.successful}, CSVs: ${state.csvsExtracted}`);
+    
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      `ZIP extraction finished! ZIPs: ${state.processed} | Successful: ${state.successful} | Failed: ${state.failed} | CSVs: ${state.csvsExtracted}`,
+      '✅ Phase 2 Complete',
+      10
+    );
+  }
+}
+
+/**
+ * Count ZIP files in TEST folder (lightweight, doesn't store list)
+ */
+function countZipsInTestFolder_(monthFilter = null) {
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+  let count = 0;
+  
+  const yearFolders = rootFolder.getFolders();
+  while (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    
+    const monthFolders = yearFolder.getFolders();
+    while (monthFolders.hasNext()) {
+      const monthFolder = monthFolders.next();
+      
+      if (monthFilter) {
+        const monthName = monthFolder.getName();
+        const monthNum = parseInt(monthName.split('-')[0], 10);
+        if (!monthFilter.includes(monthNum)) {
+          continue;
+        }
+      }
+      
+      const dateFolders = monthFolder.getFolders();
+      while (dateFolders.hasNext()) {
+        const dateFolder = dateFolders.next();
+        const files = dateFolder.getFilesByType(MimeType.ZIP);
+        while (files.hasNext()) {
+          files.next();
+          count++;
+        }
+      }
+    }
+  }
+  
+  return count;
+}
+
+// State management functions
+function getTestPhase1State_() {
+  const props = PropertiesService.getDocumentProperties();
+  const json = props.getProperty(RAW_TEST_PHASE1_STATE_KEY);
+  return json ? JSON.parse(json) : null;
+}
+
+function saveTestPhase1State_(state) {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    props.setProperty(RAW_TEST_PHASE1_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    Logger.log(`❌ Error saving Phase 1 state: ${e.message}`);
+  }
+}
+
+function getTestPhase2State_() {
+  const props = PropertiesService.getDocumentProperties();
+  const json = props.getProperty(RAW_TEST_PHASE2_STATE_KEY);
+  return json ? JSON.parse(json) : null;
+}
+
+function saveTestPhase2State_(state) {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    props.setProperty(RAW_TEST_PHASE2_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    Logger.log(`❌ Error saving Phase 2 state: ${e.message}`);
+  }
+}
+
+function updateTestPhase1Note_(dateStr, message) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard (TEST)");
+  if (!sheet) return;
+  
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === dateStr) {
+      sheet.getRange(i + 1, 6).setValue(message);
+      return;
+    }
+  }
+  
+  // Add new row if date not found
+  sheet.appendRow([dateStr, '', '', '', '', message]);
+}
+
+function updateTestPhase2Note_(dateStr, message) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard (TEST)");
+  if (!sheet) return;
+  
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === dateStr) {
+      const current = String(sheet.getRange(i + 1, 6).getValue() || '');
+      sheet.getRange(i + 1, 6).setValue(current + ' | ' + message);
+      return;
+    }
+  }
+}
+
+// View status functions
+function viewTestPhase1Status() {
+  const state = getTestPhase1State_();
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!state) {
+    ui.alert('📊 Phase 1 Status', 'No Phase 1 download in progress.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const progress = state.queue.length > 0 ? ((state.processed / state.queue.length) * 100).toFixed(1) : 0;
+  
+  ui.alert(
+    '📊 Phase 1 Download Status',
+    `Status: ${state.status}\n\n` +
+    `Date Range: ${state.startDate} to ${state.endDate}\n` +
+    `Progress: ${state.processed}/${state.queue.length} (${progress}%)\n` +
+    `Files Downloaded: ${state.totalFiles}\n` +
+    `  ├─ CSVs: ${state.totalCSVs}\n` +
+    `  └─ ZIPs: ${state.totalZIPs}\n\n` +
+    `Started: ${new Date(state.startTime).toLocaleString()}`,
+    ui.ButtonSet.OK
+  );
+}
+
+function viewTestPhase2Status() {
+  const state = getTestPhase2State_();
+  const ui = SpreadsheetApp.getUi();
+  
+  if (!state) {
+    ui.alert('📊 Phase 2 Status', 'No Phase 2 extraction in progress.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const estimatedTotal = state.estimatedTotal || state.processed || 'Unknown';
+  const progress = (estimatedTotal !== 'Unknown' && estimatedTotal > 0) 
+    ? ((state.processed / estimatedTotal) * 100).toFixed(1) 
+    : '0.0';
+  
+  const scopeMsg = state.monthFilter 
+    ? `Month(s): ${state.monthFilter.join(', ')}`
+    : 'All months';
+  
+  ui.alert(
+    '📊 Phase 2 Extraction Status',
+    `Status: ${state.status}\n` +
+    `Scope: ${scopeMsg}\n\n` +
+    `Progress: ${state.processed}/${estimatedTotal} (~${progress}%)\n` +
+    `Successful: ${state.successful}\n` +
+    `Failed: ${state.failed}\n` +
+    `CSVs Extracted: ${state.csvsExtracted}\n\n` +
+    `Started: ${new Date(state.startTime).toLocaleString()}`,
+    ui.ButtonSet.OK
+  );
+}
+
+// Trigger functions
+function createTestPhase1Trigger() {
+  // Delete existing trigger if any
+  const props = PropertiesService.getDocumentProperties();
+  const existingId = props.getProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  if (existingId) {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getUniqueId() === existingId) {
+        ScriptApp.deleteTrigger(trigger);
+        break;
+      }
+    }
+  }
+  
+  // Create new trigger
+  const trigger = ScriptApp.newTrigger('processTestPhase1Chunk_')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+  
+  props.setProperty(RAW_TEST_PHASE1_TRIGGER_KEY, trigger.getUniqueId());
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Phase 1 Trigger Created',
+    'Phase 1 will auto-resume every 10 minutes.\n\n' +
+    'The system will pause if Gmail quota is exceeded and auto-retry when quota is available.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+function createTestPhase2Trigger() {
+  const trigger = ScriptApp.newTrigger('processTestPhase2Chunk_')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+  
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty(RAW_TEST_PHASE2_TRIGGER_KEY, trigger.getUniqueId());
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Phase 2 Trigger Created',
+    'Phase 2 will auto-resume every 10 minutes.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+function stopAllTestTriggers() {
+  const props = PropertiesService.getDocumentProperties();
+  const scriptProps = PropertiesService.getScriptProperties();
+  
+  const phase1Id = props.getProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  const phase2Id = props.getProperty(RAW_TEST_PHASE2_TRIGGER_KEY);
+  const dailyId = props.getProperty(RAW_TEST_DAILY_TRIGGER_KEY);
+  
+  const triggers = ScriptApp.getProjectTriggers();
+  let deletedCount = 0;
+  
+  for (const trigger of triggers) {
+    const id = trigger.getUniqueId();
+    const funcName = trigger.getHandlerFunction();
+    
+    // Delete TEST-related triggers
+    if (id === phase1Id || id === phase2Id || id === dailyId || 
+        funcName === 'runWeeklyAutoDownload' || 
+        funcName === 'fixIncompleteDatesAuto' ||
+        funcName === 'runDailyMorningPhase1' ||
+        funcName === 'runDailyMorningPhase2') {
+      ScriptApp.deleteTrigger(trigger);
+      deletedCount++;
+    }
+  }
+  
+  props.deleteProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  props.deleteProperty(RAW_TEST_PHASE2_TRIGGER_KEY);
+  props.deleteProperty(RAW_TEST_DAILY_TRIGGER_KEY);
+  
+  // Also delete daily morning triggers
+  deleteDailyMorningTriggers_();
+  
+  SpreadsheetApp.getUi().alert(
+    '🛑 Triggers Stopped',
+    `Deleted ${deletedCount} TEST mode trigger(s).\n\nThis includes:\n` +
+    `• Phase 1 auto-resume\n` +
+    `• Phase 2 auto-resume\n` +
+    `• Daily email (7:30 PM)\n` +
+    `• Daily morning automation (7-8 AM)\n` +
+    `• Weekly auto-download (Sat 11:30 PM)\n` +
+    `• Fix incomplete auto-resume`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+// Audit and cleanup functions
+/**
+ * Parse month filter input (e.g., "4", "6-8", "4,6,9")
+ */
+function parseMonthFilter_(input) {
+  if (!input) return null;
+  
+  const months = [];
+  const parts = input.split(',');
+  
+  for (const part of parts) {
+    const trimmed = part.trim();
+    
+    if (trimmed.includes('-')) {
+      // Range: "6-8"
+      const range = trimmed.split('-');
+      const start = parseInt(range[0], 10);
+      const end = parseInt(range[1], 10);
+      
+      if (isNaN(start) || isNaN(end) || start < 1 || end > 12 || start > end) {
+        return null;
+      }
+      
+      for (let m = start; m <= end; m++) {
+        if (!months.includes(m)) months.push(m);
+      }
+    } else {
+      // Single month: "4"
+      const month = parseInt(trimmed, 10);
+      if (isNaN(month) || month < 1 || month > 12) {
+        return null;
+      }
+      if (!months.includes(month)) months.push(month);
+    }
+  }
+  
+  return months.sort((a, b) => a - b);
+}
+
+/**
+ * Helper: Apply status color coding to a cell
+ */
+function applyStatusColor_(cell, status) {
+  if (status.includes('✅')) {
+    cell.setBackground("#d4edda").setFontColor("#155724").setFontWeight("bold");
+  } else if (status.includes('❌')) {
+    cell.setBackground("#f8d7da").setFontColor("#721c24").setFontWeight("bold");
+  } else if (status.includes('⚠️')) {
+    cell.setBackground("#fff3cd").setFontColor("#856404").setFontWeight("bold");
+  } else if (status.includes('⚪')) {
+    cell.setBackground("#e9ecef").setFontColor("#6c757d");
+  }
+}
+
+/**
+ * Comprehensive audit: Compare Gmail email counts vs Drive file counts
+ * Writes detailed results to "OVERALL CROSS AUDIT GTE" sheet
+ */
+function auditTestFolder() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Ask user to select scope
+  const scopeResponse = ui.alert(
+    '🔍 Select Audit Scope',
+    'Choose audit scope:\n\n' +
+    'YES = Full audit (all dates, ~5-10 min)\n' +
+    'NO = Select specific month(s)\n' +
+    'CANCEL = Exit',
+    ui.ButtonSet.YES_NO_CANCEL
+  );
+  
+  if (scopeResponse === ui.Button.CANCEL) return;
+  
+  let monthFilter = null; // null = all months
+  
+  if (scopeResponse === ui.Button.NO) {
+    // Ask which month(s) to audit
+    const monthInput = ui.prompt(
+      '📅 Select Month(s)',
+      'Enter month(s) to audit:\n\n' +
+      'Examples:\n' +
+      '  "4" = April only\n' +
+      '  "6-8" = June through August\n' +
+      '  "4,6,9" = April, June, September\n\n' +
+      'Enter month number(s):',
+      ui.ButtonSet.OK_CANCEL
+    );
+    
+    if (monthInput.getSelectedButton() !== ui.Button.OK) return;
+    
+    const input = monthInput.getResponseText().trim();
+    monthFilter = parseMonthFilter_(input);
+    
+    if (!monthFilter) {
+      ui.alert('❌ Invalid Input', 'Could not parse month selection. Please try again.', ui.ButtonSet.OK);
+      return;
+    }
+  }
+  
+  const scopeMsg = monthFilter 
+    ? `Month(s): ${monthFilter.join(', ')}`
+    : 'All dates';
+  
+  const response = ui.alert(
+    '🔍 Start Gmail vs Drive Audit',
+    `Audit Scope: ${scopeMsg}\n\n` +
+    'This will:\n' +
+    '1. Scan Drive folders\n' +
+    '2. Check Gmail for each date\n' +
+    '3. Compare: 1 email = 1 file\n' +
+    '4. Write to "OVERALL CROSS AUDIT GTE"\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) return;
+  
+  ui.alert('⏳ Step 1/3: Scanning Drive', 'Reading date folders and counting files...', ui.ButtonSet.OK);
+  
+  // Step 1: Scan Drive for all dates and file counts
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+  const driveData = [];
+  
+  const yearFolders = rootFolder.getFolders();
+  while (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    const monthFolders = yearFolder.getFolders();
+    
+    while (monthFolders.hasNext()) {
+      const monthFolder = monthFolders.next();
+      const dateFolders = monthFolder.getFolders();
+      
+      while (dateFolders.hasNext()) {
+        const dateFolder = dateFolders.next();
+        const dateStr = dateFolder.getName();
+        
+        // Apply month filter if specified
+        if (monthFilter) {
+          const dateMonth = parseInt(dateStr.split('-')[1], 10);
+          if (!monthFilter.includes(dateMonth)) {
+            continue; // Skip this date
+          }
+        }
+        
+        let csvCount = 0;
+        let zipCount = 0;
+        
+        const csvs = dateFolder.getFilesByType(MimeType.CSV);
+        while (csvs.hasNext()) {
+          csvs.next();
+          csvCount++;
+        }
+        
+        const zips = dateFolder.getFilesByType(MimeType.ZIP);
+        while (zips.hasNext()) {
+          zips.next();
+          zipCount++;
+        }
+        
+        driveData.push({
+          date: dateStr,
+          csvCount: csvCount,
+          zipCount: zipCount,
+          totalFiles: csvCount + zipCount
+        });
+      }
+    }
+  }
+  
+  driveData.sort((a, b) => a.date.localeCompare(b.date));
+  
+  if (driveData.length === 0) {
+    ui.alert('⚠️ No Dates Found', 'No dates found matching the selected month(s).', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const estimatedMinutes = Math.ceil(driveData.length / 60); // ~1 date per second
+  ui.alert('⏳ Step 2/3: Checking Gmail', `Found ${driveData.length} dates in Drive.\n\nNow checking Gmail for each date...\n\nEstimated time: ${estimatedMinutes} minute(s)`, ui.ButtonSet.OK);
+  
+  // Step 2: Check Gmail for email counts for each date
+  const auditResults = [];
+  let mismatches = 0;
+  let missing = 0;
+  let complete = 0;
+  let extraFiles = 0;
+  
+  for (let i = 0; i < driveData.length; i++) {
+    const item = driveData[i];
+    
+    // Parse date
+    const dateParts = item.date.split('-');
+    const year = parseInt(dateParts[0], 10);
+    const month = parseInt(dateParts[1], 10);
+    const day = parseInt(dateParts[2], 10);
+    
+    // Build Gmail query with timezone-safe date calculation
+    const afterDate = `${year}/${month}/${day}`;
+    let nextYear = year;
+    let nextMonth = month;
+    let nextDay = day + 1;
+    
+    const daysInMonth = new Date(year, month, 0).getDate();
+    if (nextDay > daysInMonth) {
+      nextDay = 1;
+      nextMonth++;
+      if (nextMonth > 12) {
+        nextMonth = 1;
+        nextYear++;
+      }
+    }
+    
+    const beforeDate = `${nextYear}/${nextMonth}/${nextDay}`;
+    const query = `label:cm360-qa subject:"CM360 CPC/CPM FLIGHT QA" after:${afterDate} before:${beforeDate}`;
+    
+    let emailCount = 0;
+    try {
+      const threads = GmailApp.search(query, 0, 50);
+      emailCount = threads.length;
+    } catch (e) {
+      emailCount = -1; // Error flag
+    }
+    
+    // Compare: 1 Gmail email should = 1 Drive file
+    let status = '✅ Match';
+    let notes = '';
+    let matchDiff = 0;
+    
+    if (emailCount === -1) {
+      status = '⚠️ Error';
+      notes = 'Gmail search failed - quota or API error';
+    } else if (item.totalFiles === 0 && emailCount === 0) {
+      status = '⚪ No Data';
+      notes = 'No emails or files (expected for pre-production dates)';
+    } else if (item.totalFiles === 0 && emailCount > 0) {
+      status = '❌ Missing All';
+      notes = `${emailCount} emails in Gmail but 0 files in Drive - NEEDS DOWNLOAD`;
+      matchDiff = emailCount;
+      missing++;
+    } else if (emailCount > item.totalFiles) {
+      status = '⚠️ Incomplete';
+      matchDiff = emailCount - item.totalFiles;
+      notes = `${emailCount} emails but only ${item.totalFiles} files - MISSING ${matchDiff} files`;
+      mismatches++;
+    } else if (emailCount < item.totalFiles) {
+      status = '⚠️ Extra Files';
+      matchDiff = item.totalFiles - emailCount;
+      notes = `${emailCount} emails but ${item.totalFiles} files - ${matchDiff} EXTRA files (possible duplicates)`;
+      extraFiles++;
+    } else {
+      status = '✅ Match';
+      notes = `Perfect match: ${emailCount} emails = ${item.totalFiles} files`;
+      complete++;
+    }
+    
+    auditResults.push([
+      item.date,
+      emailCount >= 0 ? emailCount : 'ERROR',
+      item.totalFiles,
+      item.csvCount,
+      item.zipCount,
+      matchDiff !== 0 ? matchDiff : '-',
+      status,
+      notes
+    ]);
+    
+    // Progress logging every 25 dates
+    if ((i + 1) % 25 === 0) {
+      Logger.log(`Audited ${i + 1}/${driveData.length} dates...`);
+    }
+  }
+  
+  ui.alert('⏳ Step 3/3: Writing Results', `Audit complete!\n\nWriting ${auditResults.length} rows to spreadsheet...`, ui.ButtonSet.OK);
+  
+  // Step 3: Write results to audit sheet (append mode - keeps existing data)
+  let sheet = ss.getSheetByName("OVERALL CROSS AUDIT GTE");
+  if (!sheet) {
+    sheet = ss.insertSheet("OVERALL CROSS AUDIT GTE");
+  }
+  
+  // Check if sheet already has data
+  const lastRow = sheet.getLastRow();
+  const hasExistingData = lastRow > 1; // More than just header
+  
+  if (!hasExistingData) {
+    // First-time setup: Create headers
+    sheet.clear();
+    
+    // Set up columns
+    sheet.setColumnWidth(1, 120);  // Date
+    sheet.setColumnWidth(2, 110);  // Gmail Emails
+    sheet.setColumnWidth(3, 110);  // Drive Files
+    sheet.setColumnWidth(4, 80);   // CSVs
+    sheet.setColumnWidth(5, 80);   // ZIPs
+    sheet.setColumnWidth(6, 100);  // Difference
+    sheet.setColumnWidth(7, 130);  // Status
+    sheet.setColumnWidth(8, 450);  // Notes
+    
+    // Headers
+    const headers = [
+      ["Date", "Gmail Emails", "Drive Files", "CSVs", "ZIPs", "Difference", "Status", "Notes"]
+    ];
+    
+    sheet.getRange(1, 1, 1, 8).setValues(headers)
+      .setFontWeight("bold")
+      .setBackground("#4285f4")
+      .setFontColor("#ffffff")
+      .setHorizontalAlignment("center");
+    
+    // Freeze header row
+    sheet.setFrozenRows(1);
+  }
+  
+  // Update or append audit results
+  if (auditResults.length > 0) {
+    if (hasExistingData) {
+      // Read existing data (skip header)
+      const existingData = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+      const existingDates = new Map();
+      
+      // Build map of existing dates to row numbers
+      for (let i = 0; i < existingData.length; i++) {
+        const dateStr = String(existingData[i][0]);
+        if (dateStr) {
+          existingDates.set(dateStr, i + 2); // +2 for header row and 1-based index
+        }
+      }
+      
+      // Update existing rows and collect new rows
+      const newRows = [];
+      for (const result of auditResults) {
+        const dateStr = result[0];
+        const rowNum = existingDates.get(dateStr);
+        
+        if (rowNum) {
+          // Update existing row
+          sheet.getRange(rowNum, 1, 1, 8).setValues([result]);
+          
+          // Apply color coding
+          const statusCell = sheet.getRange(rowNum, 7);
+          const status = result[6];
+          applyStatusColor_(statusCell, status);
+        } else {
+          // New date - will append later
+          newRows.push(result);
+        }
+      }
+      
+      // Append new rows
+      if (newRows.length > 0) {
+        const nextRow = sheet.getLastRow() + 1;
+        sheet.getRange(nextRow, 1, newRows.length, 8).setValues(newRows);
+        
+        // Color-code new rows
+        for (let i = 0; i < newRows.length; i++) {
+          const statusCell = sheet.getRange(nextRow + i, 7);
+          const status = newRows[i][6];
+          applyStatusColor_(statusCell, status);
+        }
+      }
+      
+      Logger.log(`Updated ${auditResults.length - newRows.length} existing rows, added ${newRows.length} new rows`);
+      
+    } else {
+      // No existing data - write all results
+      sheet.getRange(2, 1, auditResults.length, 8).setValues(auditResults);
+      
+      // Color-code status column
+      for (let i = 0; i < auditResults.length; i++) {
+        const statusCell = sheet.getRange(i + 2, 7);
+        const status = auditResults[i][6];
+        applyStatusColor_(statusCell, status);
+      }
+    }
+    
+    // Center-align numeric columns for all data
+    const dataRows = sheet.getLastRow() - 1;
+    if (dataRows > 0) {
+      sheet.getRange(2, 2, dataRows, 5).setHorizontalAlignment("center");
+    }
+  }
+  
+  // Summary
+  const totalIssues = missing + mismatches + extraFiles;
+  const summary = 
+    `✅ Cross-Audit Complete!\n\n` +
+    `📊 SUMMARY:\n` +
+    `Total Dates: ${driveData.length}\n` +
+    `✅ Perfect Match: ${complete}\n` +
+    `⚠️ Incomplete: ${mismatches}\n` +
+    `❌ Missing All Files: ${missing}\n` +
+    `⚠️ Extra Files: ${extraFiles}\n\n` +
+    `${totalIssues > 0 ? `⚠️ ${totalIssues} dates need attention` : `✅ All dates verified!`}\n\n` +
+    `Results written to "OVERALL CROSS AUDIT GTE" sheet.`;
+  
+  ui.alert('🔍 Audit Results', summary, ui.ButtonSet.OK);
+}
+
+/**
+ * Fix Incomplete Dates: Archive incomplete folders and auto-restart download
+ * Uses chunked execution to avoid timeout (processes 10 dates at a time)
+ */
+function fixIncompleteDatesAuto() {
+  const props = PropertiesService.getScriptProperties();
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Check if resuming from previous run
+  const stateJson = props.getProperty('FIX_INCOMPLETE_STATE');
+  
+  if (!stateJson) {
+    // === INITIAL RUN: Identify incomplete dates ===
+    
+    // Step 1: Check if audit sheet exists
+    const auditSheet = ss.getSheetByName("OVERALL CROSS AUDIT GTE");
+    if (!auditSheet) {
+      ui.alert(
+        '❌ Audit Not Found',
+        'Please run "Audit Test Folder" first to identify incomplete dates.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+    
+    // Step 2: Read audit data and find incomplete dates
+    const data = auditSheet.getDataRange().getValues();
+    if (data.length <= 1) {
+      ui.alert('❌ No Data', 'Audit sheet is empty. Run audit first.', ui.ButtonSet.OK);
+      return;
+    }
+    
+    const incompleteDates = [];
+    
+    for (let i = 1; i < data.length; i++) {
+      const dateCell = data[i][0];
+      const status = String(data[i][6] || '');
+      
+      // Convert date to YYYY-MM-DD string format
+      let dateStr = '';
+      if (dateCell instanceof Date) {
+        const year = dateCell.getFullYear();
+        const month = String(dateCell.getMonth() + 1).padStart(2, '0');
+        const day = String(dateCell.getDate()).padStart(2, '0');
+        dateStr = `${year}-${month}-${day}`;
+      } else {
+        dateStr = String(dateCell || '').trim();
+      }
+      
+      if (!dateStr || dateStr === '') continue;
+      
+      // Find rows with "⚠️ Incomplete" or "⚠️ Extra Files"
+      if (status.includes('⚠️')) {
+        incompleteDates.push({
+          date: dateStr,
+          status: status,
+          gmailEmails: data[i][1],
+          driveFiles: data[i][2],
+          difference: data[i][5]
+        });
+      }
+    }
+    
+    if (incompleteDates.length === 0) {
+      ui.alert(
+        '✅ All Complete',
+        'No incomplete dates found! All dates match Gmail.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+    
+    // Step 3: Show summary and ask confirmation
+    const summary = incompleteDates.slice(0, 10).map(d => 
+      `  ${d.date}: ${d.status} (${d.difference} files)`
+    ).join('\n');
+    
+    const confirmMsg = 
+      `🔧 Fix Incomplete Dates\n\n` +
+      `Found ${incompleteDates.length} incomplete dates:\n\n` +
+      `${summary}` +
+      (incompleteDates.length > 10 ? `\n  ...and ${incompleteDates.length - 10} more` : '') +
+      `\n\n` +
+      `This will:\n` +
+      `1. Archive incomplete folders (10 per run)\n` +
+      `2. Re-download fresh data from Gmail\n` +
+      `3. Auto-resume every 10 min if needed\n\n` +
+      `Total runs needed: ${Math.ceil(incompleteDates.length / 10)}\n` +
+      `Estimated time: ${Math.ceil(incompleteDates.length / 10) * 10} minutes\n\n` +
+      `Continue?`;
+    
+    const response = ui.alert('🔧 Fix Incomplete Dates', confirmMsg, ui.ButtonSet.YES_NO);
+    
+    if (response !== ui.Button.YES) return;
+    
+    // Initialize state
+    const state = {
+      allDates: incompleteDates.map(d => d.date).sort(),
+      archivedDates: [],
+      currentIndex: 0,
+      totalCount: incompleteDates.length,
+      startTime: new Date().toISOString()
+    };
+    
+    props.setProperty('FIX_INCOMPLETE_STATE', JSON.stringify(state));
+    
+    // Create auto-resume trigger
+    createFixIncompleteResumeTrigger_();
+    
+    Logger.log(`🔧 Fix started: ${state.totalCount} dates to archive`);
+  }
+  
+  // === CHUNKED EXECUTION: Process batch ===
+  
+  const state = JSON.parse(props.getProperty('FIX_INCOMPLETE_STATE'));
+  const CHUNK_SIZE = 10; // Archive 10 dates per execution
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+  const archiveFolder = DriveApp.getFolderById(RAW_DATA_TEST_ARCHIVE_FOLDER_ID);
+  
+  const endIndex = Math.min(state.currentIndex + CHUNK_SIZE, state.allDates.length);
+  const chunk = state.allDates.slice(state.currentIndex, endIndex);
+  
+  Logger.log(`📦 Processing batch: ${state.currentIndex + 1}-${endIndex} of ${state.totalCount}`);
+  
+  // Archive this chunk
+  for (const dateStr of chunk) {
+    try {
+      const dateFolder = findDateFolder_(rootFolder, dateStr);
+      
+      if (dateFolder) {
+        // Create archive subfolder with date name (or use existing)
+        let archiveDateFolder;
+        const existingArchiveFolders = archiveFolder.getFoldersByName(dateStr);
+        
+        if (existingArchiveFolders.hasNext()) {
+          archiveDateFolder = existingArchiveFolders.next();
+          Logger.log(`📁 Using existing archive folder: ${dateStr}`);
+        } else {
+          archiveDateFolder = archiveFolder.createFolder(dateStr);
+        }
+        
+        // Move all files to archive
+        const files = dateFolder.getFiles();
+        let fileCount = 0;
+        while (files.hasNext()) {
+          const file = files.next();
+          file.moveTo(archiveDateFolder);
+          fileCount++;
+        }
+        
+        // Delete empty date folder from TEST
+        dateFolder.setTrashed(true);
+        
+        state.archivedDates.push(dateStr);
+        Logger.log(`✅ Archived: ${dateStr} (${fileCount} files) - ${state.archivedDates.length}/${state.totalCount}`);
+      } else {
+        // Folder not found - likely already archived in previous run
+        state.archivedDates.push(dateStr);
+        Logger.log(`⏭️ Already archived: ${dateStr} (${state.archivedDates.length}/${state.totalCount})`);
+      }
+    } catch (e) {
+      Logger.log(`❌ Error archiving ${dateStr}: ${e.message}`);
+      // Still count it to avoid infinite loop
+      state.archivedDates.push(dateStr);
+    }
+  }
+  
+  // Update state
+  state.currentIndex = endIndex;
+  
+  if (state.currentIndex >= state.allDates.length) {
+    // === ALL ARCHIVING COMPLETE ===
+    
+    Logger.log(`✅ All archiving complete: ${state.archivedDates.length} dates`);
+    
+    // Start re-download Phase 1
+    const datesToRedownload = state.allDates.sort();
+    const startDate = datesToRedownload[0];
+    const endDate = datesToRedownload[datesToRedownload.length - 1];
+    
+    continueTestPhase1WithDates_(startDate, endDate, datesToRedownload);
+    createTestPhase1Trigger();
+    
+    // Clean up state and trigger
+    props.deleteProperty('FIX_INCOMPLETE_STATE');
+    deleteFixIncompleteResumeTrigger_();
+    
+    // Final summary
+    const finalMsg =
+      `✅ Archive Complete!\n\n` +
+      `Archived: ${state.archivedDates.length} folders\n` +
+      `Re-downloading: ${datesToRedownload.length} dates\n` +
+      `Date Range: ${startDate} to ${endDate}\n\n` +
+      `Phase 1 auto-resume trigger created.\n\n` +
+      `Monitor progress:\n` +
+      `  • View Download Progress (Phase 1)\n` +
+      `  • Check logs for details`;
+    
+    SpreadsheetApp.getUi().alert('🔧 Fix Process Started', finalMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+    
+  } else {
+    // === MORE BATCHES REMAINING ===
+    
+    props.setProperty('FIX_INCOMPLETE_STATE', JSON.stringify(state));
+    
+    Logger.log(`⏳ Progress: ${state.archivedDates.length}/${state.totalCount} archived`);
+    Logger.log(`⏰ Next batch in 10 minutes...`);
+  }
+}
+
+/**
+ * Create auto-resume trigger for fix incomplete process
+ */
+function createFixIncompleteResumeTrigger_() {
+  deleteFixIncompleteResumeTrigger_(); // Remove existing
+  
+  ScriptApp.newTrigger('fixIncompleteDatesAuto')
+    .timeBased()
+    .after(10 * 60 * 1000) // 10 minutes
+    .create();
+  
+  Logger.log('⏰ Created fix incomplete resume trigger (10 min)');
+}
+
+/**
+ * Delete fix incomplete resume trigger
+ */
+function deleteFixIncompleteResumeTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    if (trigger.getHandlerFunction() === 'fixIncompleteDatesAuto') {
+      ScriptApp.deleteTrigger(trigger);
+      Logger.log('🗑️ Deleted fix incomplete resume trigger');
+    }
+  }
+}
+
+/**
+ * Helper: Find date folder in Drive hierarchy
+ */
+function findDateFolder_(rootFolder, dateStr) {
+  const dateParts = dateStr.split('-');
+  const year = dateParts[0];
+  const month = dateParts[1];
+  const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[parseInt(month, 10)];
+  const monthFolderName = `${month}-${monthName}`;
+  
+  // Navigate: Year → Month → Date
+  const yearFolders = rootFolder.getFolders();
+  while (yearFolders.hasNext()) {
+    const yearFolder = yearFolders.next();
+    if (yearFolder.getName() === year) {
+      
+      const monthFolders = yearFolder.getFolders();
+      while (monthFolders.hasNext()) {
+        const monthFolder = monthFolders.next();
+        if (monthFolder.getName() === monthFolderName) {
+          
+          const dateFolders = monthFolder.getFolders();
+          while (dateFolders.hasNext()) {
+            const dateFolder = dateFolders.next();
+            if (dateFolder.getName() === dateStr) {
+              return dateFolder;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+function cleanupAndVerifyTest() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🧹 Cleanup & Verify',
+    'This will:\n' +
+    '1. Extract any remaining ZIPs\n' +
+    '2. Delete empty folders\n' +
+    '3. Generate final report\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    // Count remaining ZIPs (lightweight)
+    const zipCount = countZipsInTestFolder_();
+    
+    if (zipCount > 0) {
+      ui.alert('📦 Found ZIPs', `Found ${zipCount} remaining ZIPs. Running extraction...`, ui.ButtonSet.OK);
+      startTestPhase2Extraction();
+    } else {
+      ui.alert('✅ Complete', 'No ZIPs found. All files are extracted!', ui.ButtonSet.OK);
+    }
+  }
+}
+
+function resetTestMode() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '⚠️ Reset TEST Mode',
+    'This will clear all TEST progress and state.\n\n' +
+    'Files in Drive will NOT be deleted.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    const props = PropertiesService.getDocumentProperties();
+    props.deleteProperty(RAW_TEST_PHASE1_STATE_KEY);
+    props.deleteProperty(RAW_TEST_PHASE2_STATE_KEY);
+    props.deleteProperty(RAW_TEST_DAILY_STATS_KEY);
+    
+    stopAllTestTriggers();
+    
+    ui.alert('✅ Reset Complete', 'TEST mode has been reset.', ui.ButtonSet.OK);
+  }
+}
+
+// =====================================================================================================================
+// ====================================== DAILY MORNING AUTOMATION SYSTEM =============================================
+// =====================================================================================================================
+
+const RAW_TEST_DAILY_MORNING_TRIGGER_KEY = 'raw_test_daily_morning_trigger_id';
+
+/**
+ * Setup Daily Morning Automation (runs 7-8 AM every day)
+ * Phase 1 at 7:00 AM → Phase 2 at 8:00 AM
+ */
+function setupDailyMorningAutomation() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Confirm setup
+  const confirmMsg = 
+    '🌅 Daily Morning Automation Setup\n\n' +
+    'Schedule:\n' +
+    '  • 7:00 AM - Phase 1 (Download new emails)\n' +
+    '  • 8:00 AM - Phase 2 (Extract ZIPs)\n\n' +
+    'This will run EVERY DAY:\n' +
+    '1. Download all new CM360 email attachments (Phase 1)\n' +
+    '2. Extract CSVs from ZIPs (Phase 2) 1 hour later\n' +
+    '3. Auto-resume if needed (chunked processing)\n\n' +
+    'Perfect for daily data collection!\n\n' +
+    'Create triggers?';
+  
+  const confirm = ui.alert('🌅 Confirm Daily Automation', confirmMsg, ui.ButtonSet.YES_NO);
+  
+  if (confirm !== ui.Button.YES) return;
+  
+  // Delete existing daily morning triggers if any
+  deleteDailyMorningTriggers_();
+  
+  // Create Phase 1 trigger (7:00 AM daily)
+  const phase1Trigger = ScriptApp.newTrigger('runDailyMorningPhase1')
+    .timeBased()
+    .atHour(7)
+    .nearMinute(0)
+    .everyDays(1)
+    .create();
+  
+  // Create Phase 2 trigger (8:00 AM daily)
+  const phase2Trigger = ScriptApp.newTrigger('runDailyMorningPhase2')
+    .timeBased()
+    .atHour(8)
+    .nearMinute(0)
+    .everyDays(1)
+    .create();
+  
+  // Store trigger IDs
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(RAW_TEST_DAILY_MORNING_TRIGGER_KEY, JSON.stringify({
+    phase1: phase1Trigger.getUniqueId(),
+    phase2: phase2Trigger.getUniqueId()
+  }));
+  
+  Logger.log('✅ Created daily morning automation triggers (7 AM Phase 1, 8 AM Phase 2)');
+  
+  ui.alert(
+    '✅ Daily Automation Enabled',
+    'Daily morning automation created!\n\n' +
+    'Phase 1 (Download): Every day at 7:00 AM\n' +
+    'Phase 2 (Extract): Every day at 8:00 AM\n\n' +
+    'Both phases will auto-resume if needed.\n\n' +
+    'To stop: Menu → 🧪 Raw Data Gap Fill (TEST) → 🛑 Stop All TEST Triggers',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Daily Morning Phase 1 (runs at 7:00 AM)
+ */
+function runDailyMorningPhase1() {
+  Logger.log('🌅 Daily Morning Phase 1 - Download Started');
+  
+  try {
+    // Download yesterday's data (emails arrive overnight)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateStr = Utilities.formatDate(yesterday, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    
+    Logger.log(`📥 Downloading data for ${dateStr}`);
+    
+    // Use the existing download function
+    const result = downloadAllAttachmentsForDate_(dateStr);
+    
+    Logger.log(`✅ Phase 1 Complete: ${result.totalFiles} files (${result.csvs} CSVs, ${result.zips} ZIPs)`);
+    
+    // If download had issues, create auto-resume trigger
+    if (result.errors && result.errors.length > 0) {
+      createTestPhase1Trigger();
+      Logger.log('⏰ Created Phase 1 auto-resume trigger (errors detected)');
+    }
+    
+  } catch (e) {
+    Logger.log(`❌ Daily Phase 1 Error: ${e.message}`);
+    
+    // Send error email
+    MailApp.sendEmail({
+      to: RAW_TEST_EMAIL_TARGET,
+      subject: '❌ Daily Phase 1 Failed',
+      body: `Daily morning Phase 1 (download) failed at ${new Date().toLocaleString()}:\n\n${e.message}\n\n${e.stack || ''}`
+    });
+  }
+}
+
+/**
+ * Daily Morning Phase 2 (runs at 8:00 AM)
+ */
+function runDailyMorningPhase2() {
+  Logger.log('🌅 Daily Morning Phase 2 - Extract Started');
+  
+  try {
+    // Check if there are any ZIPs to extract
+    const zipCount = countZipsInTestFolder_();
+    
+    if (zipCount === 0) {
+      Logger.log('ℹ️ No ZIPs found - skipping Phase 2');
+      return;
+    }
+    
+    Logger.log(`📦 Found ${zipCount} ZIPs to extract`);
+    
+    // Initialize Phase 2 state for all months (or yesterday's month specifically)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const monthNum = yesterday.getMonth() + 1;
+    
+    const state = {
+      status: 'running',
+      monthFilter: null, // Process all ZIPs
+      startTime: new Date().toISOString(),
+      processed: 0,
+      successful: 0,
+      failed: 0,
+      csvsExtracted: 0,
+      estimatedTotal: zipCount
+    };
+    
+    saveTestPhase2State_(state);
+    
+    // Run first Phase 2 batch
+    processTestPhase2Chunk_();
+    
+    // Create auto-resume trigger for Phase 2
+    createTestPhase2Trigger();
+    Logger.log('⏰ Created Phase 2 auto-resume trigger');
+    
+  } catch (e) {
+    Logger.log(`❌ Daily Phase 2 Error: ${e.message}`);
+    
+    // Send error email
+    MailApp.sendEmail({
+      to: RAW_TEST_EMAIL_TARGET,
+      subject: '❌ Daily Phase 2 Failed',
+      body: `Daily morning Phase 2 (extract) failed at ${new Date().toLocaleString()}:\n\n${e.message}\n\n${e.stack || ''}`
+    });
+  }
+}
+
+/**
+ * Delete daily morning triggers
+ */
+function deleteDailyMorningTriggers_() {
+  const props = PropertiesService.getScriptProperties();
+  const triggerDataJson = props.getProperty(RAW_TEST_DAILY_MORNING_TRIGGER_KEY);
+  
+  if (!triggerDataJson) return;
+  
+  try {
+    const triggerData = JSON.parse(triggerDataJson);
+    const triggers = ScriptApp.getProjectTriggers();
+    
+    for (const trigger of triggers) {
+      const id = trigger.getUniqueId();
+      if (id === triggerData.phase1 || id === triggerData.phase2) {
+        ScriptApp.deleteTrigger(trigger);
+        Logger.log(`🗑️ Deleted daily morning trigger: ${trigger.getHandlerFunction()}`);
+      }
+    }
+    
+    props.deleteProperty(RAW_TEST_DAILY_MORNING_TRIGGER_KEY);
+  } catch (e) {
+    Logger.log(`⚠️ Error deleting daily morning triggers: ${e.message}`);
+  }
+}
+
+// =====================================================================================================================
+// ======================================= WEEKLY AUTO-DOWNLOAD SYSTEM =================================================
+// =====================================================================================================================
+
+/**
+ * Setup Weekly Automatic Download (Saturday 11:30 PM)
+ */
+function setupWeeklyAutoDownload() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  
+  // Ask user for email notification preference
+  const emailPref = ui.alert(
+    '📧 Email Notifications',
+    'When should you receive email notifications?\n\n' +
+    'YES = Always (weekly summary)\n' +
+    'NO = Only when errors occur\n' +
+    'CANCEL = Exit setup',
+    ui.ButtonSet.YES_NO_CANCEL
+  );
+  
+  if (emailPref === ui.Button.CANCEL) return;
+  
+  const emailMode = emailPref === ui.Button.YES ? 'always' : 'errors-only';
+  props.setProperty('WEEKLY_AUTO_EMAIL_MODE', emailMode);
+  
+  // Confirm setup
+  const confirmMsg = 
+    '📅 Weekly Auto-Download Setup\n\n' +
+    'Schedule: Every Saturday at 11:30 PM\n\n' +
+    'Actions:\n' +
+    '1. Fix incomplete dates (auto-archive + re-download)\n' +
+    '2. Download past 7 days (skip existing files)\n' +
+    '3. Auto-trigger Phase 2 (ZIP extraction)\n' +
+    '4. Run audit to verify completeness\n' +
+    `5. Email ${emailMode === 'always' ? 'weekly summary' : 'only if errors'}\n\n` +
+    'This will run automatically every week.\n\n' +
+    'Create trigger?';
+  
+  const confirm = ui.alert('📅 Confirm Setup', confirmMsg, ui.ButtonSet.YES_NO);
+  
+  if (confirm !== ui.Button.YES) return;
+  
+  // Delete existing weekly trigger if any
+  deleteWeeklyAutoDownloadTrigger_();
+  
+  // Create new weekly trigger (Saturday 11:30 PM)
+  ScriptApp.newTrigger('runWeeklyAutoDownload')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.SATURDAY)
+    .atHour(23)
+    .nearMinute(30)
+    .create();
+  
+  Logger.log('✅ Created weekly auto-download trigger (Saturday 11:30 PM)');
+  
+  ui.alert(
+    '✅ Setup Complete',
+    `Weekly auto-download trigger created!\n\n` +
+    `Next run: This Saturday at 11:30 PM\n\n` +
+    `Email notifications: ${emailMode}\n\n` +
+    `To stop: CM360 QA Tools → 🧪 Raw Data Gap Fill (TEST) → 🛑 Stop All TEST Triggers`,
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Main weekly automation function (runs Saturday 11:30 PM)
+ */
+function runWeeklyAutoDownload() {
+  const startTime = new Date();
+  const props = PropertiesService.getScriptProperties();
+  const emailMode = props.getProperty('WEEKLY_AUTO_EMAIL_MODE') || 'always';
+  
+  const log = [];
+  let errors = [];
+  
+  try {
+    log.push('🤖 WEEKLY AUTO-DOWNLOAD STARTED');
+    log.push(`Time: ${startTime.toLocaleString()}`);
+    log.push('');
+    
+    // STEP 1: Fix incomplete dates from previous weeks
+    log.push('STEP 1: Checking for incomplete dates...');
+    Logger.log('📋 Step 1: Checking for incomplete dates');
+    
+    const incompleteCount = checkAndFixIncompleteDates_();
+    
+    if (incompleteCount > 0) {
+      log.push(`  ✅ Fixed ${incompleteCount} incomplete dates (archived + re-download started)`);
+      Logger.log(`✅ Fixed ${incompleteCount} incomplete dates`);
+    } else {
+      log.push(`  ✅ No incomplete dates found`);
+      Logger.log('✅ No incomplete dates');
+    }
+    log.push('');
+    
+    // STEP 2: Download past 7 days (smart: skip existing)
+    log.push('STEP 2: Downloading past 7 days...');
+    Logger.log('📥 Step 2: Downloading past 7 days');
+    
+    const downloadResult = downloadPast7DaysSmart_();
+    
+    log.push(`  📊 Scanned: ${downloadResult.scanned} dates`);
+    log.push(`  ⏭️ Skipped (already have files): ${downloadResult.skipped}`);
+    log.push(`  📥 Downloaded: ${downloadResult.downloaded} dates`);
+    log.push(`  📄 Total files: ${downloadResult.totalFiles} (${downloadResult.csvs} CSVs, ${downloadResult.zips} ZIPs)`);
+    
+    if (downloadResult.errors.length > 0) {
+      log.push(`  ⚠️ Errors: ${downloadResult.errors.length}`);
+      errors = errors.concat(downloadResult.errors);
+    }
+    log.push('');
+    
+    // STEP 3: Auto-create Phase 2 trigger (ZIP extraction)
+    log.push('STEP 3: Setting up ZIP extraction...');
+    Logger.log('📦 Step 3: Creating Phase 2 trigger');
+    
+    if (downloadResult.zips > 0) {
+      createTestPhase2Trigger();
+      log.push(`  ✅ Phase 2 trigger created (will extract ${downloadResult.zips} ZIPs)`);
+      Logger.log(`✅ Phase 2 trigger created`);
+    } else {
+      log.push(`  ℹ️ No ZIPs to extract`);
+      Logger.log('ℹ️ No ZIPs to extract');
+    }
+    log.push('');
+    
+    // STEP 4: Run audit on the week's dates
+    log.push('STEP 4: Running audit...');
+    Logger.log('🔍 Step 4: Running audit');
+    
+    const auditResult = auditPast7Days_();
+    
+    log.push(`  📊 Audited: ${auditResult.total} dates`);
+    log.push(`  ✅ Perfect match: ${auditResult.complete}`);
+    log.push(`  ⚠️ Incomplete: ${auditResult.incomplete}`);
+    log.push(`  ❌ Missing all: ${auditResult.missing}`);
+    log.push(`  ⚠️ Extra files: ${auditResult.extraFiles}`);
+    
+    if (auditResult.incomplete > 0 || auditResult.missing > 0) {
+      errors.push(`Audit found ${auditResult.incomplete + auditResult.missing} dates with issues`);
+    }
+    log.push('');
+    
+    // Summary
+    const endTime = new Date();
+    const duration = Math.round((endTime - startTime) / 1000);
+    
+    log.push('✅ WEEKLY AUTO-DOWNLOAD COMPLETE');
+    log.push(`Duration: ${duration} seconds`);
+    log.push(`Errors: ${errors.length}`);
+    
+    Logger.log('✅ Weekly auto-download complete');
+    
+    // Send email if needed
+    if (emailMode === 'always' || (emailMode === 'errors-only' && errors.length > 0)) {
+      sendWeeklyEmail_(log.join('\n'), errors);
+    }
+    
+  } catch (e) {
+    log.push('');
+    log.push(`❌ FATAL ERROR: ${e.message}`);
+    log.push(`Stack: ${e.stack}`);
+    
+    Logger.log(`❌ Fatal error: ${e.message}`);
+    
+    // Always send email on fatal error
+    sendWeeklyEmail_(log.join('\n'), [`FATAL: ${e.message}`]);
+  }
+}
+
+/**
+ * Check audit sheet and fix incomplete dates automatically
+ */
+function checkAndFixIncompleteDates_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const auditSheet = ss.getSheetByName("OVERALL CROSS AUDIT GTE");
+  
+  if (!auditSheet) return 0; // No audit data yet
+  
+  const data = auditSheet.getDataRange().getValues();
+  if (data.length <= 1) return 0;
+  
+  const incompleteDates = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    const status = String(data[i][6] || '');
+    if (status.includes('⚠️')) {
+      const dateCell = data[i][0];
+      let dateStr = '';
+      
+      if (dateCell instanceof Date) {
+        const year = dateCell.getFullYear();
+        const month = String(dateCell.getMonth() + 1).padStart(2, '0');
+        const day = String(dateCell.getDate()).padStart(2, '0');
+        dateStr = `${year}-${month}-${day}`;
+      } else {
+        dateStr = String(dateCell || '').trim();
+      }
+      
+      if (dateStr) incompleteDates.push(dateStr);
+    }
+  }
+  
+  if (incompleteDates.length === 0) return 0;
+  
+  Logger.log(`Found ${incompleteDates.length} incomplete dates - starting fix process`);
+  
+  // Trigger the fix process (it will handle archiving and re-downloading)
+  const props = PropertiesService.getScriptProperties();
+  const state = {
+    allDates: incompleteDates,
+    archivedDates: [],
+    currentIndex: 0,
+    totalCount: incompleteDates.length,
+    startTime: new Date().toISOString()
+  };
+  
+  props.setProperty('FIX_INCOMPLETE_STATE', JSON.stringify(state));
+  createFixIncompleteResumeTrigger_();
+  
+  // Run first batch immediately
+  fixIncompleteDatesAuto();
+  
+  return incompleteDates.length;
+}
+
+/**
+ * Download past 7 days (smart: skip dates that already have files)
+ */
+function downloadPast7DaysSmart_() {
+  const result = {
+    scanned: 0,
+    skipped: 0,
+    downloaded: 0,
+    totalFiles: 0,
+    csvs: 0,
+    zips: 0,
+    errors: []
+  };
+  
+  // Calculate past 7 days
+  const today = new Date();
+  const dates = [];
+  
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    dates.push(dateStr);
+  }
+  
+  result.scanned = dates.length;
+  
+  // Check each date and download if needed
+  for (const dateStr of dates) {
+    try {
+      const existing = checkExistingFilesForDate_(dateStr);
+      
+      if (existing.hasFiles) {
+        result.skipped++;
+        Logger.log(`⏭️ Skipping ${dateStr} - already has ${existing.csvCount + existing.zipCount} files`);
+        continue;
+      }
+      
+      // Download this date
+      Logger.log(`📥 Downloading ${dateStr}...`);
+      const downloadResult = downloadAllAttachmentsForDate_(dateStr);
+      
+      if (!downloadResult.skipped) {
+        result.downloaded++;
+        result.totalFiles += downloadResult.totalFiles;
+        result.csvs += downloadResult.csvsSaved;
+        result.zips += downloadResult.zipsSaved;
+        
+        Logger.log(`✅ Downloaded ${dateStr}: ${downloadResult.totalFiles} files`);
+      }
+      
+    } catch (e) {
+      result.errors.push(`${dateStr}: ${e.message}`);
+      Logger.log(`❌ Error downloading ${dateStr}: ${e.message}`);
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Audit past 7 days and return summary
+ */
+function auditPast7Days_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rootFolder = DriveApp.getFolderById(RAW_DATA_TEST_FOLDER_ID);
+  
+  const result = {
+    total: 0,
+    complete: 0,
+    incomplete: 0,
+    missing: 0,
+    extraFiles: 0
+  };
+  
+  // Calculate past 7 days
+  const today = new Date();
+  const dates = [];
+  
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    dates.push(dateStr);
+  }
+  
+  const auditResults = [];
+  
+  for (const dateStr of dates) {
+    result.total++;
+    
+    // Get Drive file count
+    const existing = checkExistingFilesForDate_(dateStr);
+    const driveFiles = existing.csvCount + existing.zipCount;
+    
+    // Get Gmail email count
+    const dateParts = dateStr.split('-');
+    const year = parseInt(dateParts[0], 10);
+    const month = parseInt(dateParts[1], 10);
+    const day = parseInt(dateParts[2], 10);
+    
+    const afterDate = `${year}/${month}/${day}`;
+    let nextYear = year;
+    let nextMonth = month;
+    let nextDay = day + 1;
+    
+    const daysInMonth = new Date(year, month, 0).getDate();
+    if (nextDay > daysInMonth) {
+      nextDay = 1;
+      nextMonth++;
+      if (nextMonth > 12) {
+        nextMonth = 1;
+        nextYear++;
+      }
+    }
+    
+    const beforeDate = `${nextYear}/${nextMonth}/${nextDay}`;
+    const query = `label:cm360-qa subject:"CM360 CPC/CPM FLIGHT QA" after:${afterDate} before:${beforeDate}`;
+    
+    let emailCount = 0;
+    try {
+      const threads = GmailApp.search(query, 0, 50);
+      emailCount = threads.length;
+    } catch (e) {
+      emailCount = -1;
+    }
+    
+    // Categorize
+    let status = '✅ Match';
+    let notes = '';
+    let matchDiff = 0;
+    
+    if (emailCount === -1) {
+      status = '⚠️ Error';
+      notes = 'Gmail search failed';
+    } else if (driveFiles === 0 && emailCount === 0) {
+      status = '⚪ No Data';
+      notes = 'No emails or files';
+    } else if (driveFiles === 0 && emailCount > 0) {
+      status = '❌ Missing All';
+      notes = `${emailCount} emails but 0 files`;
+      matchDiff = emailCount;
+      result.missing++;
+    } else if (emailCount > driveFiles) {
+      status = '⚠️ Incomplete';
+      matchDiff = emailCount - driveFiles;
+      notes = `Missing ${matchDiff} files`;
+      result.incomplete++;
+    } else if (emailCount < driveFiles) {
+      status = '⚠️ Extra Files';
+      matchDiff = driveFiles - emailCount;
+      notes = `${matchDiff} extra files`;
+      result.extraFiles++;
+    } else {
+      status = '✅ Match';
+      notes = 'Perfect match';
+      result.complete++;
+    }
+    
+    auditResults.push([
+      dateStr,
+      emailCount >= 0 ? emailCount : 'ERROR',
+      driveFiles,
+      existing.csvCount,
+      existing.zipCount,
+      matchDiff !== 0 ? matchDiff : '-',
+      status,
+      notes
+    ]);
+  }
+  
+  // Write to audit sheet (append mode)
+  let sheet = ss.getSheetByName("OVERALL CROSS AUDIT GTE");
+  if (!sheet) {
+    sheet = ss.insertSheet("OVERALL CROSS AUDIT GTE");
+    
+    // Setup headers
+    sheet.setColumnWidth(1, 120);
+    sheet.setColumnWidth(2, 110);
+    sheet.setColumnWidth(3, 110);
+    sheet.setColumnWidth(4, 80);
+    sheet.setColumnWidth(5, 80);
+    sheet.setColumnWidth(6, 100);
+    sheet.setColumnWidth(7, 130);
+    sheet.setColumnWidth(8, 450);
+    
+    const headers = [["Date", "Gmail Emails", "Drive Files", "CSVs", "ZIPs", "Difference", "Status", "Notes"]];
+    sheet.getRange(1, 1, 1, 8).setValues(headers)
+      .setFontWeight("bold")
+      .setBackground("#4285f4")
+      .setFontColor("#ffffff")
+      .setHorizontalAlignment("center");
+    
+    sheet.setFrozenRows(1);
+  }
+  
+  // Update or append results
+  const lastRow = sheet.getLastRow();
+  const hasExistingData = lastRow > 1;
+  
+  if (hasExistingData) {
+    const existingData = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+    const existingDates = new Map();
+    
+    for (let i = 0; i < existingData.length; i++) {
+      const dateStr = String(existingData[i][0]);
+      if (dateStr) existingDates.set(dateStr, i + 2);
+    }
+    
+    const newRows = [];
+    for (const result of auditResults) {
+      const dateStr = result[0];
+      const rowNum = existingDates.get(dateStr);
+      
+      if (rowNum) {
+        sheet.getRange(rowNum, 1, 1, 8).setValues([result]);
+        applyStatusColor_(sheet.getRange(rowNum, 7), result[6]);
+      } else {
+        newRows.push(result);
+      }
+    }
+    
+    if (newRows.length > 0) {
+      const nextRow = sheet.getLastRow() + 1;
+      sheet.getRange(nextRow, 1, newRows.length, 8).setValues(newRows);
+      
+      for (let i = 0; i < newRows.length; i++) {
+        applyStatusColor_(sheet.getRange(nextRow + i, 7), newRows[i][6]);
+      }
+    }
+  } else {
+    sheet.getRange(2, 1, auditResults.length, 8).setValues(auditResults);
+    
+    for (let i = 0; i < auditResults.length; i++) {
+      applyStatusColor_(sheet.getRange(i + 2, 7), auditResults[i][6]);
+    }
+  }
+  
+  // Center-align numeric columns
+  const dataRows = sheet.getLastRow() - 1;
+  if (dataRows > 0) {
+    sheet.getRange(2, 2, dataRows, 5).setHorizontalAlignment("center");
+  }
+  
+  return result;
+}
+
+/**
+ * Send weekly summary email
+ */
+function sendWeeklyEmail_(logText, errors) {
+  const userEmail = Session.getActiveUser().getEmail();
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  
+  const subject = errors.length > 0 
+    ? `⚠️ CM360 Weekly Auto-Download - ERRORS - ${today}`
+    : `✅ CM360 Weekly Auto-Download - Success - ${today}`;
+  
+  const body = 
+    `CM360 Weekly Auto-Download Report\n` +
+    `Date: ${today}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `${logText}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  
+  if (errors.length > 0) {
+    const errorList = errors.map((e, i) => `${i + 1}. ${e}`).join('\n');
+    const fullBody = body + `\n⚠️ ERRORS:\n${errorList}\n\nPlease check the logs for details.`;
+    GmailApp.sendEmail(userEmail, subject, fullBody);
+  } else {
+    GmailApp.sendEmail(userEmail, subject, body);
+  }
+  
+  Logger.log(`📧 Email sent to ${userEmail}`);
+}
+
+/**
+ * Delete weekly auto-download trigger
+ */
+function deleteWeeklyAutoDownloadTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    if (trigger.getHandlerFunction() === 'runWeeklyAutoDownload') {
+      ScriptApp.deleteTrigger(trigger);
+      Logger.log('🗑️ Deleted existing weekly auto-download trigger');
+    }
+  }
+}
+
+// =====================================================================================================================
+// ===================================== DAILY STATS & EMAIL FUNCTIONS ==============================================
+// =====================================================================================================================
+
+/**
+ * Get today's statistics (resets daily)
+ */
+function getTodayStats_() {
+  const props = PropertiesService.getDocumentProperties();
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const json = props.getProperty(RAW_TEST_DAILY_STATS_KEY);
+  
+  if (json) {
+    const stats = JSON.parse(json);
+    // Check if stats are from today
+    if (stats.date === today) {
+      return stats;
+    }
+  }
+  
+  // Create new stats for today
+  return {
+    date: today,
+    gmailSearches: 0,
+    csvsSaved: 0,
+    zipsSaved: 0,
+    datesCompleted: [],
+    lastEmailSent: null
+  };
+}
+
+/**
+ * Save today's statistics
+ */
+function saveTodayStats_(stats) {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    props.setProperty(RAW_TEST_DAILY_STATS_KEY, JSON.stringify(stats));
+  } catch (e) {
+    Logger.log(`❌ Error saving daily stats: ${e.message}`);
+  }
+}
+
+/**
+ * View today's progress
+ */
+function viewTodayProgress() {
+  const stats = getTodayStats_();
+  const state = getTestPhase1State_();
+  
+  let progressMsg = '';
+  if (state && state.queue) {
+    const totalDates = state.queue.length;
+    const completed = state.processed || 0;
+    const remaining = totalDates - completed;
+    const percentComplete = totalDates > 0 ? ((completed / totalDates) * 100).toFixed(1) : 0;
+    
+    progressMsg = `\nOverall Progress: ${completed}/${totalDates} dates (${percentComplete}%)\nRemaining: ${remaining} dates`;
+    
+    // Estimate time remaining
+    if (stats.datesCompleted.length > 0 && remaining > 0) {
+      const daysElapsed = state.startTime ? Math.max(1, Math.ceil((Date.now() - new Date(state.startTime).getTime()) / (24 * 60 * 60 * 1000))) : 1;
+      const ratePerDay = completed / daysElapsed;
+      if (ratePerDay > 0) {
+        const daysRemaining = Math.ceil(remaining / ratePerDay);
+        progressMsg += `\nETA: ~${daysRemaining} days`;
+      }
+    }
+  }
+  
+  const datesMsg = stats.datesCompleted.length > 0 
+    ? `\n\nDates completed today:\n${stats.datesCompleted.join('\n')}`
+    : '\n\nNo dates completed yet today.';
+  
+  SpreadsheetApp.getUi().alert(
+    '📊 Today\'s Progress',
+    `Date: ${stats.date}\n\n` +
+    `Gmail Searches: ${stats.gmailSearches}\n` +
+    `CSVs Saved: ${stats.csvsSaved}\n` +
+    `ZIPs Saved: ${stats.zipsSaved}\n` +
+    `Dates Completed: ${stats.datesCompleted.length}` +
+    progressMsg +
+    datesMsg,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Create daily email trigger (7-8 PM)
+ */
+function createDailyEmailTrigger() {
+  const props = PropertiesService.getDocumentProperties();
+  const existingId = props.getProperty(RAW_TEST_DAILY_TRIGGER_KEY);
+  
+  // Delete existing trigger if any
+  if (existingId) {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getUniqueId() === existingId) {
+        ScriptApp.deleteTrigger(trigger);
+        break;
+      }
+    }
+  }
+  
+  // Create new trigger at 7:30 PM daily
+  const trigger = ScriptApp.newTrigger('sendDailyProgressEmail_')
+    .timeBased()
+    .atHour(19) // 7 PM
+    .nearMinute(30)
+    .everyDays(1)
+    .create();
+  
+  props.setProperty(RAW_TEST_DAILY_TRIGGER_KEY, trigger.getUniqueId());
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Daily Email Trigger Created',
+    'Progress summary will be sent to:\n' + RAW_TEST_EMAIL_TARGET + '\n\n' +
+    'Every day at approximately 7:30 PM.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Send daily progress email (triggered at 7-8 PM)
+ */
+function sendDailyProgressEmail_() {
+  const stats = getTodayStats_();
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  
+  // Check if already sent today
+  if (stats.lastEmailSent === today) {
+    Logger.log('Daily email already sent today');
+    return;
+  }
+  
+  const state = getTestPhase1State_();
+  
+  // Build email content
+  let subject = `[CM360 TEST] Daily Progress Report - ${today}`;
+  
+  let body = `<html><body style="font-family: Arial, sans-serif;">`;
+  body += `<h2 style="color: #1a73e8;">📊 Phase 1 Daily Progress Report</h2>`;
+  body += `<p><strong>Date:</strong> ${today}</p>`;
+  body += `<hr>`;
+  
+  // Today's work
+  body += `<h3>Today's Activity</h3>`;
+  body += `<ul>`;
+  body += `<li><strong>Gmail Searches:</strong> ${stats.gmailSearches}</li>`;
+  body += `<li><strong>CSVs Saved:</strong> ${stats.csvsSaved}</li>`;
+  body += `<li><strong>ZIPs Saved:</strong> ${stats.zipsSaved}</li>`;
+  body += `<li><strong>Dates Completed:</strong> ${stats.datesCompleted.length}</li>`;
+  body += `</ul>`;
+  
+  // Dates completed today
+  if (stats.datesCompleted.length > 0) {
+    body += `<h4>Dates Completed Today:</h4>`;
+    body += `<ul>`;
+    for (const date of stats.datesCompleted) {
+      body += `<li>${date}</li>`;
+    }
+    body += `</ul>`;
+  } else {
+    body += `<p><em>No dates completed today.</em></p>`;
+  }
+  
+  // Overall progress
+  if (state && state.queue) {
+    const totalDates = state.queue.length;
+    const completed = state.processed || 0;
+    const remaining = totalDates - completed;
+    const percentComplete = totalDates > 0 ? ((completed / totalDates) * 100).toFixed(1) : 0;
+    
+    body += `<hr>`;
+    body += `<h3>Overall Progress</h3>`;
+    body += `<ul>`;
+    body += `<li><strong>Total Dates:</strong> ${totalDates}</li>`;
+    body += `<li><strong>Completed:</strong> ${completed} (${percentComplete}%)</li>`;
+    body += `<li><strong>Remaining:</strong> ${remaining}</li>`;
+    body += `<li><strong>Total CSVs:</strong> ${state.totalCSVs || 0}</li>`;
+    body += `<li><strong>Total ZIPs:</strong> ${state.totalZIPs || 0}</li>`;
+    body += `<li><strong>Total Files:</strong> ${state.totalFiles || 0}</li>`;
+    body += `</ul>`;
+    
+    // ETA calculation
+    if (stats.datesCompleted.length > 0 && remaining > 0) {
+      const daysElapsed = state.startTime ? Math.max(1, Math.ceil((Date.now() - new Date(state.startTime).getTime()) / (24 * 60 * 60 * 1000))) : 1;
+      const ratePerDay = completed / daysElapsed;
+      if (ratePerDay > 0) {
+        const daysRemaining = Math.ceil(remaining / ratePerDay);
+        body += `<p><strong>Estimated Time Remaining:</strong> ~${daysRemaining} days</p>`;
+      }
+    }
+    
+    // Date range
+    body += `<p><strong>Date Range:</strong> ${state.startDate} to ${state.endDate}</p>`;
+    body += `<p><strong>Status:</strong> ${state.status}</p>`;
+  }
+  
+  body += `<hr>`;
+  body += `<p style="color: #666; font-size: 12px;">This is an automated report from CM360 TEST Mode Phase 1.</p>`;
+  body += `</body></html>`;
+  
+  // Send email
+  try {
+    MailApp.sendEmail({
+      to: RAW_TEST_EMAIL_TARGET,
+      subject: subject,
+      htmlBody: body
+    });
+    
+    Logger.log(`✅ Daily email sent to ${RAW_TEST_EMAIL_TARGET}`);
+    
+    // Mark as sent
+    stats.lastEmailSent = today;
+    saveTodayStats_(stats);
+    
+  } catch (e) {
+    Logger.log(`❌ Error sending daily email: ${e.message}`);
+  }
+}
+
+/**
+ * Send Phase 1 completion email (immediate)
+ */
+function sendPhase1CompletionEmail_(state) {
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  
+  let subject = `[CM360 TEST] ✅ Phase 1 COMPLETE!`;
+  
+  let body = `<html><body style="font-family: Arial, sans-serif;">`;
+  body += `<h2 style="color: #34a853;">✅ Phase 1 Download Complete!</h2>`;
+  body += `<p><strong>Completion Time:</strong> ${today}</p>`;
+  body += `<hr>`;
+  
+  body += `<h3>Final Statistics</h3>`;
+  body += `<ul>`;
+  body += `<li><strong>Dates Processed:</strong> ${state.processed}</li>`;
+  body += `<li><strong>Total Files:</strong> ${state.totalFiles}</li>`;
+  body += `<li><strong>CSVs:</strong> ${state.totalCSVs}</li>`;
+  body += `<li><strong>ZIPs:</strong> ${state.totalZIPs}</li>`;
+  body += `<li><strong>Date Range:</strong> ${state.startDate} to ${state.endDate}</li>`;
+  body += `</ul>`;
+  
+  body += `<hr>`;
+  body += `<h3>Next Steps</h3>`;
+  body += `<ol>`;
+  body += `<li>Run <strong>Phase 2: Extract All ZIPs</strong> to unpack the ${state.totalZIPs} ZIP files</li>`;
+  body += `<li>Run <strong>Audit TEST Folder</strong> to verify all files</li>`;
+  body += `<li>Compare with production folder for validation</li>`;
+  body += `</ol>`;
+  
+  body += `<hr>`;
+  body += `<p style="color: #666; font-size: 12px;">The auto-trigger has been stopped. Phase 1 is complete.</p>`;
+  body += `</body></html>`;
+  
+  try {
+    MailApp.sendEmail({
+      to: RAW_TEST_EMAIL_TARGET,
+      subject: subject,
+      htmlBody: body
+    });
+    
+    Logger.log(`✅ Completion email sent to ${RAW_TEST_EMAIL_TARGET}`);
+  } catch (e) {
+    Logger.log(`❌ Error sending completion email: ${e.message}`);
+  }
+}
+
+// =====================================================================================================================
+// ======================================= END RAW DATA GAP FILL (TEST MODE) ========================================
+// =====================================================================================================================
+
+// =====================================================================================================================
 // ======================================= END RAW DATA GAP FILL SYSTEM ===============================================
 // =====================================================================================================================
 
 
 
 // ======================================= END HISTORICAL ARCHIVE SYSTEM ===============================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ======================================= SMART VIOLATIONS GAP FILL AUTOMATION ========================================
+// =====================================================================================================================
+
+const SMART_PROCESS_TRIGGER_KEY = 'smart_gap_fill_process_trigger';
+const SMART_REFRESH_TRIGGER_KEY = 'smart_gap_fill_refresh_trigger';
+
+/**
+ * Start Smart Gap Fill Automation
+ * - Processes one date every 15 minutes
+ * - Refreshes violations audit every 10 minutes
+ */
+function startSmartGapFillAutomation() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  
+  Logger.log('=== Starting Smart Gap Fill Automation ===');
+  
+  // Check if already running
+  const processTrigger = props.getProperty(SMART_PROCESS_TRIGGER_KEY);
+  const refreshTrigger = props.getProperty(SMART_REFRESH_TRIGGER_KEY);
+  
+  if (processTrigger || refreshTrigger) {
+    Logger.log('Automation already running, asking user to restart');
+    const response = ui.alert(
+      '⚠️ Automation Already Running',
+      'Smart automation triggers are already active.\n\n' +
+      'Do you want to stop and restart them?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      Logger.log('User chose to restart automation');
+      stopSmartGapFillAutomation();
+    } else {
+      Logger.log('User cancelled restart');
+      return;
+    }
+  }
+  
+  // First, run violations audit to get current status
+  Logger.log('Starting Violations Audit scan');
+  ss.toast('Scanning Drive for missing violations reports...', '🔄 Initializing', 10);
+  
+  setupAndRefreshViolationsAudit();
+  Logger.log('Violations Audit complete');
+  
+  // Get missing dates
+  const missingDates = getMissingDatesFromAudit_();
+  Logger.log(`Found ${missingDates.length} missing dates`);
+  
+  if (missingDates.length === 0) {
+    Logger.log('No gaps found - all reports present');
+    ss.toast('All violations reports are present in Drive!', '✅ No Gaps Found', 5);
+    return;
+  }
+  
+  // Initialize progress sheet
+  Logger.log(`Creating Gap Fill Progress sheet for ${missingDates.length} missing dates`);
+  ss.toast('Setting up progress tracking...', '📊 Creating Progress Sheet', 5);
+  setupGapFillProgressSheet();
+  
+  // Verify sheet was created
+  const progressSheet = ss.getSheetByName("Gap Fill Progress");
+  if (!progressSheet) {
+    Logger.log('ERROR: Failed to create Gap Fill Progress sheet');
+    ss.toast('Failed to create Gap Fill Progress sheet. Please try again.', '❌ Error', 10);
+    return;
+  }
+  
+  const count = initializeGapFillProgress_(missingDates);
+  Logger.log(`Initialized ${count} dates in Gap Fill Progress sheet`);
+  
+  // Initialize state
+  const state = {
+    queue: missingDates,
+    currentDate: null,
+    currentStep: null,
+    startTime: new Date().toISOString(),
+    processed: 0,
+    successful: 0,
+    failed: 0,
+    totalToProcess: missingDates.length,
+    completedFiles: [] // Track completed files with details
+  };
+  saveGapFillState_(state);
+  Logger.log(`Gap fill state saved. Queue size: ${state.queue.length}`);
+  
+  // Create triggers
+  try {
+    Logger.log('Creating automation triggers...');
+    ss.toast('Creating automation triggers...', '⚙️ Setting Up', 3);
+    
+    // Process trigger: Every 15 minutes (Google only allows 1, 5, 10, 15, 30)
+    const processTrig = ScriptApp.newTrigger('smartProcessNextDate')
+      .timeBased()
+      .everyMinutes(15)
+      .create();
+    props.setProperty(SMART_PROCESS_TRIGGER_KEY, processTrig.getUniqueId());
+    Logger.log(`Created process trigger: ${processTrig.getUniqueId()}`);
+    
+    // Refresh trigger: Every 10 minutes
+    const refreshTrig = ScriptApp.newTrigger('smartRefreshAudit')
+      .timeBased()
+      .everyMinutes(10)
+      .create();
+    props.setProperty(SMART_REFRESH_TRIGGER_KEY, refreshTrig.getUniqueId());
+    Logger.log(`Created refresh trigger: ${refreshTrig.getUniqueId()}`);
+    
+    Logger.log('Starting first date processing immediately...');
+    ss.toast('Processing first date...', '▶️ Starting', 3);
+    
+    // Process first date immediately
+    smartProcessNextDate();
+    
+    const estimatedTime = formatEstimatedTime_(count * 15);
+    Logger.log(`=== Automation Started Successfully ===`);
+    Logger.log(`Missing dates: ${count}`);
+    Logger.log(`Estimated completion: ${estimatedTime}`);
+    Logger.log(`Process interval: 15 minutes`);
+    Logger.log(`Refresh interval: 10 minutes`);
+    
+    ss.toast(
+      `Processing ${count} dates. Est. completion: ${estimatedTime}. Check "Gap Fill Progress" sheet.`,
+      '🤖 Automation Started',
+      10
+    );
+    
+  } catch (e) {
+    Logger.log(`ERROR creating triggers: ${e.toString()}`);
+    ss.toast(`Failed to create triggers: ${e.toString()}`, '❌ Error', 15);
+  }
+}
+
+/**
+ * Stop Smart Gap Fill Automation
+ */
+function stopSmartGapFillAutomation() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+  
+  Logger.log('=== Stopping Smart Gap Fill Automation ===');
+  
+  let stopped = 0;
+  
+  // Delete process trigger
+  const processId = props.getProperty(SMART_PROCESS_TRIGGER_KEY);
+  if (processId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === processId) {
+        ScriptApp.deleteTrigger(trigger);
+        stopped++;
+        Logger.log(`Deleted process trigger: ${processId}`);
+      }
+    });
+    props.deleteProperty(SMART_PROCESS_TRIGGER_KEY);
+  }
+  
+  // Delete refresh trigger
+  const refreshId = props.getProperty(SMART_REFRESH_TRIGGER_KEY);
+  if (refreshId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === refreshId) {
+        ScriptApp.deleteTrigger(trigger);
+        stopped++;
+        Logger.log(`Deleted refresh trigger: ${refreshId}`);
+      }
+    });
+    props.deleteProperty(SMART_REFRESH_TRIGGER_KEY);
+  }
+  
+  if (stopped > 0) {
+    const state = getGapFillState_();
+    const remaining = state ? state.queue.length : 0;
+    
+    Logger.log(`Automation stopped. Processed: ${state ? state.processed : 0}, Successful: ${state ? state.successful : 0}, Failed: ${state ? state.failed : 0}, Remaining: ${remaining}`);
+    
+    ss.toast(
+      `Processed: ${state ? state.processed : 0} | Successful: ${state ? state.successful : 0} | Failed: ${state ? state.failed : 0} | Remaining: ${remaining}`,
+      '🛑 Automation Stopped',
+      10
+    );
+  } else {
+    Logger.log('No active automation triggers found');
+    ss.toast('No smart automation triggers were found.', 'ℹ️ No Active Automation', 5);
+  }
+}
+
+/**
+ * Smart process next date (triggered every 20 minutes)
+ */
+function smartProcessNextDate() {
+  const startTime = Date.now();
+  const state = getGapFillState_();
+  
+  if (!state || !state.queue || state.queue.length === 0) {
+    Logger.log('✅ Gap fill complete - all dates processed');
+    stopSmartGapFillAutomation();
+    sendCompletionNotification_();
+    return;
+  }
+  
+  // Process ONE date
+  const dateStr = state.queue[0];
+  state.currentDate = dateStr;
+  
+  Logger.log(`🔄 Processing date: ${dateStr}`);
+  updateGapFillProgress_(dateStr, '🔄 Running Time Machine...', '', '');
+  
+  try {
+    // Run Time Machine to generate violations report
+    // This will: Import raw data from Gmail → Run QA → Save violations to Drive
+    const tmResult = runTimeMachineForDate_(dateStr);
+    
+    if (tmResult.success) {
+      updateGapFillProgress_(dateStr, '✅ Complete', '', tmResult.filename);
+      
+      // Track completed file details
+      if (!state.completedFiles) state.completedFiles = [];
+      state.completedFiles.push({
+        date: dateStr,
+        filename: tmResult.filename,
+        violationCount: tmResult.violationCount,
+        folderPath: tmResult.folderPath,
+        fileUrl: tmResult.fileUrl
+      });
+      
+      state.successful++;
+    } else {
+      updateGapFillProgress_(dateStr, '❌ Failed', tmResult.error, '');
+      state.failed++;
+    }
+    
+    state.processed++;
+    state.queue.shift();
+    saveGapFillState_(state);
+    
+    const elapsed = (Date.now() - startTime) / 1000;
+    Logger.log(`✅ Completed ${dateStr} in ${elapsed.toFixed(1)}s. Remaining: ${state.queue.length}`);
+    
+  } catch (e) {
+    Logger.log(`❌ Error processing ${dateStr}: ${e.toString()}`);
+    updateGapFillProgress_(dateStr, '❌ Error', e.toString(), '');
+    state.failed++;
+    state.processed++;
+    state.queue.shift();
+    saveGapFillState_(state);
+  }
+}
+
+/**
+ * Smart refresh audit (triggered every 10 minutes)
+ */
+function smartRefreshAudit() {
+  Logger.log('🔄 Smart refresh: Updating Violations Audit...');
+  
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("Violations Audit");
+    
+    if (sheet) {
+      // Only refresh if the audit sheet exists
+      setupAndRefreshViolationsAudit();
+      Logger.log('✅ Violations Audit refreshed');
+    }
+  } catch (e) {
+    Logger.log(`⚠️ Could not refresh audit: ${e.toString()}`);
+  }
+}
+
+/**
+ * Send completion notification
+ */
+function sendCompletionNotification_() {
+  const state = getGapFillState_();
+  if (!state) return;
+  
+  const subject = '✅ Violations Gap Fill Complete';
+  
+  let body = `<html><body style="font-family: Arial, sans-serif;">`;
+  body += `<h2>✅ Gap Fill Automation Complete</h2>`;
+  body += `<p><strong>Total Processed:</strong> ${state.processed}</p>`;
+  body += `<p><strong>Successful:</strong> ${state.successful}</p>`;
+  body += `<p><strong>Failed:</strong> ${state.failed}</p>`;
+  body += `<p><strong>Duration:</strong> ${calculateDuration_(state.startTime)}</p>`;
+  body += `<hr>`;
+  
+  // List successfully created files
+  if (state.completedFiles && state.completedFiles.length > 0) {
+    body += `<h3>📄 Successfully Created Files (${state.completedFiles.length}):</h3>`;
+    body += `<table style="border-collapse: collapse; width: 100%;">`;
+    body += `<tr style="background-color: #f0f0f0; font-weight: bold;">`;
+    body += `<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Date</th>`;
+    body += `<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">File</th>`;
+    body += `<th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Placements</th>`;
+    body += `<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Folder</th>`;
+    body += `</tr>`;
+    
+    for (const file of state.completedFiles) {
+      body += `<tr>`;
+      body += `<td style="border: 1px solid #ddd; padding: 8px;">${file.date}</td>`;
+      body += `<td style="border: 1px solid #ddd; padding: 8px;"><a href="${file.fileUrl}">${file.filename}</a></td>`;
+      body += `<td style="border: 1px solid #ddd; padding: 8px; text-align: center; font-weight: bold;">${file.violationCount}</td>`;
+      body += `<td style="border: 1px solid #ddd; padding: 8px; font-size: 11px;">${file.folderPath}</td>`;
+      body += `</tr>`;
+    }
+    
+    body += `</table>`;
+    body += `<p style="color: #666; font-size: 12px; margin-top: 10px;">`;
+    body += `<strong>Total Violations Processed:</strong> ${state.completedFiles.reduce((sum, f) => sum + f.violationCount, 0)} placements`;
+    body += `</p>`;
+  }
+  
+  // List failed dates
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const progressSheet = ss.getSheetByName("Gap Fill Progress");
+  if (progressSheet && state.failed > 0) {
+    body += `<hr>`;
+    body += `<h3>❌ Failed Dates (${state.failed}):</h3>`;
+    body += `<ul>`;
+    
+    const data = progressSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const status = String(data[i][1]);
+      if (status.includes('❌')) {
+        const date = data[i][0];
+        const error = data[i][4] || 'Unknown error';
+        body += `<li><strong>${date}:</strong> ${error}</li>`;
+      }
+    }
+    
+    body += `</ul>`;
+  }
+  
+  body += `<hr>`;
+  body += `<p>Check the "Gap Fill Progress" and "Violations Audit" sheets for full details.</p>`;
+  body += `<p><a href="https://drive.google.com/drive/folders/1lJm0K1LLo9ez29AcKCc4qtIbBC2uK3a9">📁 View All Reports in Drive</a></p>`;
+  body += `</body></html>`;
+  
+  try {
+    MailApp.sendEmail({
+      to: Session.getActiveUser().getEmail(),
+      subject: subject,
+      htmlBody: body
+    });
+    Logger.log(`✅ Completion email sent with ${state.completedFiles ? state.completedFiles.length : 0} files listed`);
+  } catch (e) {
+    Logger.log(`Could not send completion email: ${e.toString()}`);
+  }
+}
+
+/**
+ * Format estimated time
+ */
+function formatEstimatedTime_(minutes) {
+  if (minutes < 60) {
+    return `${Math.round(minutes)} minutes`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  return `${hours}h ${mins}m`;
+}
+
+/**
+ * Calculate duration
+ */
+function calculateDuration_(startISO) {
+  const start = new Date(startISO);
+  const end = new Date();
+  const diffMs = end - start;
+  const diffMins = Math.round(diffMs / 60000);
+  return formatEstimatedTime_(diffMins);
+}
+
+// =====================================================================================================================
+// ======================================= END SMART VIOLATIONS GAP FILL AUTOMATION ===================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ======================================= SMART RAW DATA GAP FILL AUTOMATION ==========================================
+// =====================================================================================================================
+
+const SMART_RAW_PROCESS_TRIGGER_KEY = 'smart_raw_gap_fill_process_trigger';
+const SMART_RAW_REFRESH_TRIGGER_KEY = 'smart_raw_gap_fill_refresh_trigger';
+
+/**
+ * Start Smart Raw Data Gap Fill Automation
+ * - Processes raw data downloads every 15 minutes
+ * - Refreshes raw data audit every 10 minutes
+ */
+function startSmartRawDataAutomation() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  
+  // Check if already running
+  const processTrigger = props.getProperty(SMART_RAW_PROCESS_TRIGGER_KEY);
+  const refreshTrigger = props.getProperty(SMART_RAW_REFRESH_TRIGGER_KEY);
+  
+  if (processTrigger || refreshTrigger) {
+    const response = ui.alert(
+      '⚠️ Automation Already Running',
+      'Smart raw data automation triggers are already active.\n\n' +
+      'Do you want to stop and restart them?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      stopSmartRawDataAutomation();
+    } else {
+      return;
+    }
+  }
+  
+  // First, run raw data audit to get current status
+  ui.alert(
+    '🔄 Initializing',
+    'Scanning Drive for missing raw data files...\n\nThis will take a moment.',
+    ui.ButtonSet.OK
+  );
+  
+  setupAndRefreshRawDataAudit();
+  
+  // Get missing dates from Audit Dashboard
+  const missingDates = getMissingRawDataDatesFromAudit_();
+  
+  if (missingDates.length === 0) {
+    ui.alert(
+      '✅ No Gaps Found',
+      'All raw data files are present in Drive!\n\nNo automation needed.',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+  
+  // Initialize state
+  const state = {
+    missingDates: missingDates,
+    currentIndex: 0,
+    startTime: new Date().toISOString(),
+    processed: 0,
+    successful: 0,
+    failed: 0,
+    totalToProcess: missingDates.length
+  };
+  props.setProperty('smart_raw_state', JSON.stringify(state));
+  
+  // Create triggers
+  try {
+    // Process trigger: Every 15 minutes (faster since it's just Gmail downloads)
+    const processTrig = ScriptApp.newTrigger('smartProcessRawDataBatch')
+      .timeBased()
+      .everyMinutes(15)
+      .create();
+    props.setProperty(SMART_RAW_PROCESS_TRIGGER_KEY, processTrig.getUniqueId());
+    
+    // Refresh trigger: Every 10 minutes
+    const refreshTrig = ScriptApp.newTrigger('smartRefreshRawDataAudit')
+      .timeBased()
+      .everyMinutes(10)
+      .create();
+    props.setProperty(SMART_RAW_REFRESH_TRIGGER_KEY, refreshTrig.getUniqueId());
+    
+    // Process first batch immediately
+    smartProcessRawDataBatch();
+    
+    ui.alert(
+      '🤖 Smart Raw Data Automation Started',
+      `Found ${missingDates.length} missing date(s).\n\n` +
+      `⚙️ AUTOMATION ACTIVE:\n` +
+      `• Processing Gmail downloads every 15 minutes\n` +
+      `• Refreshing audit every 10 minutes\n\n` +
+      `📊 Progress tracked in execution logs\n` +
+      `📋 Results updated in "Audit Dashboard" sheet\n\n` +
+      `Estimated completion: ${formatEstimatedTime_(missingDates.length * 15)}\n\n` +
+      `Use "Stop Smart Automation" to cancel at any time.`,
+      ui.ButtonSet.OK
+    );
+    
+  } catch (e) {
+    ui.alert('❌ Error', `Failed to create triggers: ${e.toString()}`, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Stop Smart Raw Data Gap Fill Automation
+ */
+function stopSmartRawDataAutomation() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  
+  let stopped = 0;
+  
+  // Delete process trigger
+  const processId = props.getProperty(SMART_RAW_PROCESS_TRIGGER_KEY);
+  if (processId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === processId) {
+        ScriptApp.deleteTrigger(trigger);
+        stopped++;
+      }
+    });
+    props.deleteProperty(SMART_RAW_PROCESS_TRIGGER_KEY);
+  }
+  
+  // Delete refresh trigger
+  const refreshId = props.getProperty(SMART_RAW_REFRESH_TRIGGER_KEY);
+  if (refreshId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === refreshId) {
+        ScriptApp.deleteTrigger(trigger);
+        stopped++;
+      }
+    });
+    props.deleteProperty(SMART_RAW_REFRESH_TRIGGER_KEY);
+  }
+  
+  if (stopped > 0) {
+    const stateJson = props.getProperty('smart_raw_state');
+    const state = stateJson ? JSON.parse(stateJson) : null;
+    
+    ui.alert(
+      '🛑 Raw Data Automation Stopped',
+      `Smart raw data automation has been stopped.\n\n` +
+      `Processed: ${state ? state.processed : 0}\n` +
+      `Successful: ${state ? state.successful : 0}\n` +
+      `Failed: ${state ? state.failed : 0}\n\n` +
+      `You can restart automation at any time.`,
+      ui.ButtonSet.OK
+    );
+  } else {
+    ui.alert(
+      'ℹ️ No Active Automation',
+      'No smart raw data automation triggers were found.',
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * Smart process raw data batch (triggered every 15 minutes)
+ */
+function smartProcessRawDataBatch() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('smart_raw_state');
+  
+  if (!stateJson) {
+    Logger.log('✅ Raw data gap fill complete - no state found');
+    stopSmartRawDataAutomation();
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  if (state.currentIndex >= state.missingDates.length) {
+    Logger.log('✅ All raw data dates processed');
+    stopSmartRawDataAutomation();
+    sendRawDataCompletionNotification_(state);
+    return;
+  }
+  
+  const dateStr = state.missingDates[state.currentIndex];
+  Logger.log(`🔄 Processing raw data for date: ${dateStr}`);
+  
+  try {
+    // Download raw data from Gmail for this date
+    const result = downloadRawDataForDate_(dateStr);
+    
+    if (result.success) {
+      Logger.log(`✅ Downloaded ${result.filesProcessed} files for ${dateStr}`);
+      state.successful++;
+    } else {
+      Logger.log(`❌ Failed to download for ${dateStr}: ${result.error}`);
+      state.failed++;
+    }
+    
+    state.processed++;
+    state.currentIndex++;
+    props.setProperty('smart_raw_state', JSON.stringify(state));
+    
+    Logger.log(`Progress: ${state.processed}/${state.totalToProcess} dates`);
+    
+  } catch (e) {
+    Logger.log(`❌ Error processing ${dateStr}: ${e.toString()}`);
+    state.failed++;
+    state.processed++;
+    state.currentIndex++;
+    props.setProperty('smart_raw_state', JSON.stringify(state));
+  }
+}
+
+/**
+ * Smart refresh raw data audit (triggered every 10 minutes)
+ */
+function smartRefreshRawDataAudit() {
+  Logger.log('🔄 Smart refresh: Updating Raw Data Audit...');
+  
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("Audit Dashboard");
+    
+    if (sheet) {
+      refreshAuditDashboardChunked();
+      Logger.log('✅ Raw Data Audit refreshed');
+    }
+  } catch (e) {
+    Logger.log(`⚠️ Could not refresh audit: ${e.toString()}`);
+  }
+}
+
+/**
+ * Get missing raw data dates from Audit Dashboard
+ */
+function getMissingRawDataDatesFromAudit_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Audit Dashboard");
+  
+  if (!sheet || sheet.getLastRow() < 2) {
+    return [];
+  }
+  
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  const missingDates = [];
+  
+  for (const row of data) {
+    const dateStr = row[0];
+    const status = row[1];
+    
+    if (status === '❌ MISSING' && dateStr) {
+      missingDates.push(String(dateStr));
+    }
+  }
+  
+  return missingDates;
+}
+
+/**
+ * Send raw data completion notification
+ */
+function sendRawDataCompletionNotification_(state) {
+  const subject = '✅ Raw Data Gap Fill Complete';
+  const body = `
+    <h2>Raw Data Gap Fill Automation Complete</h2>
+    <p><strong>Total Processed:</strong> ${state.processed}</p>
+    <p><strong>Successful:</strong> ${state.successful}</p>
+    <p><strong>Failed:</strong> ${state.failed}</p>
+    <p><strong>Duration:</strong> ${calculateDuration_(state.startTime)}</p>
+    <hr>
+    <p>Check the "Audit Dashboard" sheet for details.</p>
+  `;
+  
+  try {
+    MailApp.sendEmail({
+      to: Session.getActiveUser().getEmail(),
+      subject: subject,
+      htmlBody: body
+    });
+  } catch (e) {
+    Logger.log(`Could not send completion email: ${e.toString()}`);
+  }
+}
+
+// =====================================================================================================================
+// ======================================= END SMART RAW DATA GAP FILL AUTOMATION ======================================
+// =====================================================================================================================
+
+// =====================================================================================================================
+// ======================================= SMART TEST MODE AUTOMATION ==================================================
+// =====================================================================================================================
+
+const SMART_TEST_COMPLETE_TRIGGER_KEY = 'smart_test_complete_trigger';
+
+/**
+ * Start Complete TEST Automation - Runs both Phase 1 and Phase 2 automatically
+ */
+function startCompleteTestAutomation() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  
+  // Check if already running
+  const existingTrigger = props.getProperty(SMART_TEST_COMPLETE_TRIGGER_KEY);
+  
+  if (existingTrigger) {
+    const response = ui.alert(
+      '⚠️ Automation Already Running',
+      'Complete TEST automation is already active.\n\n' +
+      'Do you want to stop and restart it?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      stopCompleteTestAutomation();
+    } else {
+      return;
+    }
+  }
+  
+  const response = ui.alert(
+    '🤖 Start Complete TEST Automation',
+    'This will automatically:\n\n' +
+    '1. Run Phase 1 (Download all attachments)\n' +
+    '2. Wait for Phase 1 to complete\n' +
+    '3. Run Phase 2 (Extract all ZIPs)\n' +
+    '4. Send completion email\n\n' +
+    'The system will handle everything automatically.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) {
+    return;
+  }
+  
+  // Initialize complete test state
+  const state = {
+    phase: 1,
+    startTime: new Date().toISOString(),
+    phase1Complete: false,
+    phase2Complete: false
+  };
+  props.setProperty('smart_test_complete_state', JSON.stringify(state));
+  
+  // Create monitoring trigger (checks every 15 minutes)
+  const trigger = ScriptApp.newTrigger('monitorCompleteTestAutomation')
+    .timeBased()
+    .everyMinutes(15)
+    .create();
+  props.setProperty(SMART_TEST_COMPLETE_TRIGGER_KEY, trigger.getUniqueId());
+  
+  // Start Phase 1
+  startTestPhase1Download();
+  createTestPhase1Trigger();
+  
+  ui.alert(
+    '🤖 Complete TEST Automation Started',
+    'Phase 1 (Download) has been started.\n\n' +
+    'The system will automatically:\n' +
+    '• Monitor Phase 1 progress\n' +
+    '• Start Phase 2 when Phase 1 completes\n' +
+    '• Send completion email when done\n\n' +
+    'You can check progress in the TEST sheets or logs.',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Stop Complete TEST Automation
+ */
+function stopCompleteTestAutomation() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  
+  // Delete monitoring trigger
+  const triggerId = props.getProperty(SMART_TEST_COMPLETE_TRIGGER_KEY);
+  if (triggerId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === triggerId) {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+    props.deleteProperty(SMART_TEST_COMPLETE_TRIGGER_KEY);
+  }
+  
+  // Also stop phase-specific triggers
+  stopAllTestTriggers();
+  
+  ui.alert(
+    '🛑 Complete TEST Automation Stopped',
+    'All TEST automation triggers have been stopped.\n\n' +
+    'You can restart automation at any time.',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Monitor complete test automation progress
+ */
+function monitorCompleteTestAutomation() {
+  const props = PropertiesService.getScriptProperties();
+  const stateJson = props.getProperty('smart_test_complete_state');
+  
+  if (!stateJson) {
+    Logger.log('No complete test state found');
+    stopCompleteTestAutomation();
+    return;
+  }
+  
+  const state = JSON.parse(stateJson);
+  
+  // Check Phase 1 status
+  if (state.phase === 1 && !state.phase1Complete) {
+    const phase1StateJson = props.getProperty(RAW_TEST_PHASE1_STATE_KEY);
+    if (phase1StateJson) {
+      const phase1State = JSON.parse(phase1StateJson);
+      
+      if (phase1State.completed) {
+        Logger.log('✅ Phase 1 complete, starting Phase 2');
+        state.phase = 2;
+        state.phase1Complete = true;
+        props.setProperty('smart_test_complete_state', JSON.stringify(state));
+        
+        // Stop Phase 1 trigger
+        stopTestPhase1Trigger_();
+        
+        // Start Phase 2
+        Utilities.sleep(2000);
+        startTestPhase2Extraction();
+        createTestPhase2Trigger();
+      }
+    }
+  }
+  
+  // Check Phase 2 status
+  if (state.phase === 2 && !state.phase2Complete) {
+    const phase2StateJson = props.getProperty(RAW_TEST_PHASE2_STATE_KEY);
+    if (phase2StateJson) {
+      const phase2State = JSON.parse(phase2StateJson);
+      
+      if (phase2State.completed) {
+        Logger.log('✅ Phase 2 complete, TEST automation finished');
+        state.phase2Complete = true;
+        props.setProperty('smart_test_complete_state', JSON.stringify(state));
+        
+        // Stop Phase 2 trigger
+        stopTestPhase2Trigger_();
+        
+        // Send completion notification
+        sendCompleteTestNotification_(state);
+        
+        // Stop monitoring
+        stopCompleteTestAutomation();
+      }
+    }
+  }
+}
+
+/**
+ * Send complete test automation notification
+ */
+function sendCompleteTestNotification_(state) {
+  const subject = '✅ Complete TEST Automation Finished';
+  const body = `
+    <h2>Complete TEST Mode Automation Finished</h2>
+    <p>Both Phase 1 (Download) and Phase 2 (Extraction) are complete!</p>
+    <hr>
+    <p><strong>Phase 1:</strong> ✅ Complete</p>
+    <p><strong>Phase 2:</strong> ✅ Complete</p>
+    <p><strong>Total Duration:</strong> ${calculateDuration_(state.startTime)}</p>
+    <hr>
+    <h3>Next Steps:</h3>
+    <ol>
+      <li>Run "Audit TEST Folder" to verify all files</li>
+      <li>Run "Cleanup & Verify" to finalize</li>
+    </ol>
+  `;
+  
+  try {
+    MailApp.sendEmail({
+      to: RAW_TEST_EMAIL_TARGET,
+      subject: subject,
+      htmlBody: body
+    });
+  } catch (e) {
+    Logger.log(`Could not send completion email: ${e.toString()}`);
+  }
+}
+
+/**
+ * Stop Phase 1 trigger
+ */
+function stopTestPhase1Trigger_() {
+  const props = PropertiesService.getScriptProperties();
+  const triggerId = props.getProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  if (triggerId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === triggerId) {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+    props.deleteProperty(RAW_TEST_PHASE1_TRIGGER_KEY);
+  }
+}
+
+/**
+ * Stop Phase 2 trigger
+ */
+function stopTestPhase2Trigger_() {
+  const props = PropertiesService.getScriptProperties();
+  const triggerId = props.getProperty(RAW_TEST_PHASE2_TRIGGER_KEY);
+  if (triggerId) {
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getUniqueId() === triggerId) {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+    props.deleteProperty(RAW_TEST_PHASE2_TRIGGER_KEY);
+  }
+}
+
+// =====================================================================================================================
+// ======================================= END SMART TEST MODE AUTOMATION ==============================================
 // =====================================================================================================================
 
 

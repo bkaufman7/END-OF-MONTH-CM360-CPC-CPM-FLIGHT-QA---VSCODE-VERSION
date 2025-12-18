@@ -23,6 +23,17 @@ const RAW_GAP_FILL_TRIGGER_KEY = 'raw_gap_fill_trigger_id';
 const RAW_GAP_FILL_TIME_BUDGET_MS = 5.5 * 60 * 1000;
 const RAW_DATA_ROOT_FOLDER_ID = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
 
+// Constants for Raw Data Gap Fill (TEST MODE - 2-Phase System)
+const RAW_DATA_TEST_FOLDER_ID = '1qA77_YET8RLiES7X7NoUT5jzTHDJ3k61';
+const RAW_DATA_TEST_ARCHIVE_FOLDER_ID = '1WkI8lpIVLW7xtga1MfKZXgCtAFbSD_e6';
+const RAW_TEST_PHASE1_STATE_KEY = 'raw_test_phase1_state';
+const RAW_TEST_PHASE2_STATE_KEY = 'raw_test_phase2_state';
+const RAW_TEST_PHASE1_TRIGGER_KEY = 'raw_test_phase1_trigger_id';
+const RAW_TEST_PHASE2_TRIGGER_KEY = 'raw_test_phase2_trigger_id';
+const RAW_TEST_DAILY_TRIGGER_KEY = 'raw_test_daily_email_trigger_id';
+const RAW_TEST_DAILY_STATS_KEY = 'raw_test_daily_stats';
+const RAW_TEST_EMAIL_TARGET = 'platformsolutionsadopshorizon@gmail.com';
+
 // =====================================================================================================================
 // ========================================= RAW DATA AUDIT SYSTEM ==================================================
 // =====================================================================================================================
@@ -411,12 +422,8 @@ function setupViolationsAudit() {
   
   sheet.setFrozenRows(1);
   
-  SpreadsheetApp.getUi().alert(
-    '✅ Violations Audit Ready',
-    'Violations Audit sheet created!\n\n' +
-    'Click "Violations Audit" from the menu to scan Drive and populate the dashboard.',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
+  Logger.log('Violations Audit sheet created successfully');
+  ss.toast('Violations Audit sheet created!', '✅ Ready', 3);
 }
 
 /**
@@ -427,37 +434,40 @@ function refreshViolationsAudit() {
   const sheet = ss.getSheetByName("Violations Audit");
   
   if (!sheet) {
-    SpreadsheetApp.getUi().alert(
-      '❌ Dashboard Not Found',
-      'Please run "Violations Audit" first.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+    Logger.log('ERROR: Violations Audit sheet not found');
+    ss.toast('Please run "Violations Audit" first.', '❌ Dashboard Not Found', 5);
     return;
   }
   
-  const ui = SpreadsheetApp.getUi();
-  ui.alert('🔄 Scanning Drive Only', 'Scanning Drive for Violations Reports...\n\nThis may take a minute.', ui.ButtonSet.OK);
+  Logger.log('Starting Violations Audit refresh - scanning Drive');
+  ss.toast('Scanning Drive for Violations Reports...', '🔄 Scanning', 5);
   
-  // Generate date range (April 15 - November 30, 2025)
+  // Generate date range (April 15, 2025 - Today) - Only 15th onwards of each month
   const allDates = [];
   
-  const months = [
-    { year: 2025, month: 4, start: 15, end: 30 },
-    { year: 2025, month: 5, start: 15, end: 31 },
-    { year: 2025, month: 6, start: 15, end: 30 },
-    { year: 2025, month: 7, start: 15, end: 31 },
-    { year: 2025, month: 8, start: 15, end: 31 },
-    { year: 2025, month: 9, start: 15, end: 30 },
-    { year: 2025, month: 10, start: 15, end: 31 },
-    { year: 2025, month: 11, start: 15, end: 30 }
-  ];
+  const startDate = new Date('2025-04-15');
+  const today = new Date();
+  today.setHours(23, 59, 59, 999); // Include full day
   
-  for (const monthInfo of months) {
-    for (let day = monthInfo.start; day <= monthInfo.end; day++) {
-      const dateStr = `${monthInfo.year}-${String(monthInfo.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  // Generate all dates from 15th onwards for each month
+  let currentDate = new Date(startDate);
+  
+  while (currentDate <= today) {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth() + 1; // JS months are 0-indexed
+    const day = currentDate.getDate();
+    
+    // Only include dates from 15th onwards
+    if (day >= 15) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       allDates.push(dateStr);
     }
+    
+    // Move to next day
+    currentDate.setDate(currentDate.getDate() + 1);
   }
+  
+  Logger.log(`Generated ${allDates.length} dates from ${startDate.toISOString().split('T')[0]} to ${today.toISOString().split('T')[0]}`);
   
   // Scan Drive for Violations Reports
   const driveData = {};
@@ -556,12 +566,6 @@ function refreshViolationsAudit() {
   
   sheet.setRowHeight(1, 35);
   
-  ui.alert(
-    '✅ Violations Audit Complete',
-    `Scanned ${allDates.length} dates in Drive (15th-31st, Apr-Nov 2025):\n\n` +
-    `✅ Found: ${foundCount}\n` +
-    `❌ Missing: ${missingCount}\n\n` +
-    `Check the Violations Audit sheet for details.`,
-    ui.ButtonSet.OK
-  );
+  Logger.log(`Violations Audit complete: ${foundCount} found, ${missingCount} missing out of ${allDates.length} dates`);
+  ss.toast(`Scanned ${allDates.length} dates | ✅ Found: ${foundCount} | ❌ Missing: ${missingCount}`, '✅ Audit Complete', 8);
 }
