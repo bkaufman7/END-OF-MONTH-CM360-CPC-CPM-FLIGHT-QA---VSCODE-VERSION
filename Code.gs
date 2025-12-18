@@ -1262,13 +1262,39 @@ function runQAOnly() {
 
       const ownerOps = resolveRep_(ownerMap, String(row[m["Network ID"]] || ""), adv) || "Unassigned";
 
+      // Determine cost structure from data
+      const costStructure = (isCPMOnly) ? "CPM" : (isCPCOnly) ? "CPC" : 
+                           (row[m["Cost Structure"]] || "");
+      
+      // Calculate severity and at-risk amount
+      const atRisk = Math.max(cpc, cpm);
+      const severity = (atRisk >= 50) ? "��️ Critical" :
+                       (atRisk >= 20) ? "⚠️ High" :
+                       (atRisk >= 10) ? "� Medium" : "� Low";
+      
+      // Determine low priority
+      const isLowPriority = issueTypes.some(it => it.includes("Low Priority")) ? "Yes" : "No";
+      
+      // Build violations row matching 15-column format:
+      // Network | Advertiser | Campaign | Placement | Placement ID | 
+      // Start Date | End Date | Cost Structure | Issue Type | 
+      // Owner | Severity | $ at Risk | Low Priority | Report Date | Notes
       resultsChunk.push([
-        row[m["Network ID"]], row[m["Report Date"]], row[m["Advertiser"]], row[m["Campaign"]],
-        row[m["Campaign Start Date"]], row[m["Campaign End Date"]], row[m["Ad"]], row[m["Placement ID"]],
-        row[m["Placement"]], row[m["Placement Start Date"]], row[m["Placement End Date"]],
-        imp, clk, ctr.toFixed(2) + "%", daysRem, pctComplete.toFixed(1) + "%", daysLeft,
-        risk, "$" + cpc.toFixed(2), "$" + cpm.toFixed(2), issueTypes.join(", "), details.join(" | "),
-        lastImpDays, lastClkDays, ownerOps
+        row[m["Network ID"]],           // Network
+        row[m["Advertiser"]],           // Advertiser
+        row[m["Campaign"]],             // Campaign
+        row[m["Placement"]],            // Placement
+        row[m["Placement ID"]],         // Placement ID
+        row[m["Placement Start Date"]], // Start Date
+        row[m["Placement End Date"]],   // End Date
+        costStructure,                  // Cost Structure
+        issueTypes.join(", "),          // Issue Type
+        ownerOps,                       // Owner
+        severity,                       // Severity
+        "$" + atRisk.toFixed(2),        // $ at Risk
+        isLowPriority,                  // Low Priority
+        row[m["Report Date"]],          // Report Date
+        details.join(" | ")             // Notes
       ]);
 
       processed++;
