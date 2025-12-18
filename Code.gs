@@ -6475,6 +6475,11 @@ function runTimeMachineQA_(dateStr) {
 /**
  * Download raw CSV files from Gmail for a specific date
  */
+/**
+ * GAP FILL: Import DCM Reports for a specific date (follows runItAll pattern)
+ * This is the Time Machine version - filters by missing date instead of today
+ * DOES NOT modify the original importDCMReports() function
+ */
 function downloadRawDataForDate_(dateStr) {
   // Try Drive first (much faster!)
   Logger.log(`🔍 Attempting to load raw data from Drive for ${dateStr}...`);
@@ -6487,7 +6492,125 @@ function downloadRawDataForDate_(dateStr) {
   
   // Fallback to Gmail if Drive folder doesn't exist
   Logger.log(`⚠️ Drive folder not found. Falling back to Gmail...`);
-  return downloadRawDataFromGmail_(dateStr);
+  return importDCMReportsForDate_(dateStr);
+}
+
+/**
+ * GAP FILL: Gmail import for specific date (pattern from importDCMReports)
+ * Phase 1: Data Preparation - Import raw CM360 data from Gmail
+ * Searches label "CM360 QA" filtered to specific missing date
+ */
+function importDCMReportsForDate_(dateStr) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let dataSheet = ss.getSheetByName("Raw Data");
+  
+  // Auto-create Raw Data sheet if it doesn't exist
+  if (!dataSheet) {
+    Logger.log('⚠️ Raw Data sheet not found - creating it now...');
+    dataSheet = ss.insertSheet("Raw Data");
+    const dataHeaders = [
+      "Network ID","Advertiser","Placement ID","Placement","Campaign",
+      "Placement Start Date","Placement End Date","Campaign Start Date","Campaign End Date",
+      "Ad","Impressions","Clicks","Report Date"
+    ];
+    dataSheet.getRange(1,1,1,dataHeaders.length).setValues([dataHeaders]).setFontWeight("bold");
+    Logger.log('✅ Raw Data sheet created');
+  }
+  
+  // Format date for Gmail search: YYYY/MM/DD
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const formattedDate = `${year}/${month}/${day}`;
+  
+  // Get next day for before: parameter
+  const nextDay = new Date(date);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const nextYear = nextDay.getFullYear();
+  const nextMonth = String(nextDay.getMonth() + 1).padStart(2, '0');
+  const nextDayNum = String(nextDay.getDate()).padStart(2, '0');
+  const formattedNextDate = `${nextYear}/${nextMonth}/${nextDayNum}`;
+  
+  // Search Gmail with CM360 QA label (same as importDCMReports)
+  const label = "CM360 QA";
+  const searchQuery = `label:${label} after:${formattedDate} before:${formattedNextDate}`;
+  
+  Logger.log(`📧 Searching Gmail: ${searchQuery}`);
+  const threads = GmailApp.search(searchQuery);
+  
+  if (threads.length === 0) {
+    return {
+      success: false,
+      error: `No emails found for ${formattedDate} with label "${label}". Check Gmail labels.`
+    };
+  }
+  
+  Logger.log(`Found ${threads.length} email thread(s) with label "${label}"`);
+  
+  let extractedData = [];
+  let filesProcessed = 0;
+  
+  // Process each thread (same as importDCMReports)
+  threads.forEach(function(thread) {
+    thread.getMessages().forEach(function(message) {
+      message.getAttachments().forEach(function(att) {
+        const filename = att.getName();
+        const netId = extractNetworkId(filename);
+        
+        try {
+          if (att.getContentType() === "text/csv" || filename.endsWith(".csv")) {
+            // Process CSV directly
+            const csvData = processCSV(att.getDataAsString(), netId);
+            extractedData = extractedData.concat(csvData);
+            filesProcessed++;
+            Logger.log(`  ✅ ${filename} (${csvData.length} rows, Network ${netId})`);
+            
+          } else if (att.getContentType() === "application/zip" || filename.endsWith(".zip")) {
+            // Unzip and process CSV files inside
+            Utilities.unzip(att.copyBlob()).forEach(function(file) {
+              const unzippedName = file.getName();
+              if (file.getContentType() === "text/csv" || unzippedName.endsWith(".csv")) {
+                const unzippedNetId = extractNetworkId(unzippedName);
+                const csvData = processCSV(file.getDataAsString(), unzippedNetId);
+                extractedData = extractedData.concat(csvData);
+                filesProcessed++;
+                Logger.log(`  ✅ (ZIP) ${unzippedName} (${csvData.length} rows, Network ${unzippedNetId})`);
+              }
+            });
+          }
+        } catch (error) {
+          Logger.log(`  ❌ Error processing ${filename}: ${error}`);
+        }
+      });
+    });
+  });
+  
+  if (extractedData.length === 0) {
+    return {
+      success: false,
+      error: `Found ${threads.length} email(s) but no CSV/ZIP data could be processed.`
+    };
+  }
+  
+  // Write to Raw Data sheet (starting at row 2, after headers)
+  const dataHeaders = [
+    "Network ID","Advertiser","Placement ID","Placement","Campaign",
+    "Placement Start Date","Placement End Date","Campaign Start Date","Campaign End Date",
+    "Ad","Impressions","Clicks","Report Date"
+  ];
+  
+  if (extractedData.length > 0) {
+    dataSheet.getRange(2, 1, extractedData.length, dataHeaders.length).setValues(extractedData);
+    Logger.log(`✅ Imported ${extractedData.length} total rows from ${filesProcessed} files`);
+  }
+  
+  return {
+    success: true,
+    filesProcessed: filesProcessed,
+    rowsImported: extractedData.length,
+    source: 'Gmail (CM360 QA label)'
+  };
 }
 
 /**
@@ -6602,119 +6725,6 @@ function downloadRawDataFromDrive_(dateStr) {
 /**
  * Download raw data from Gmail (FALLBACK - slower)
  */
-function downloadRawDataFromGmail_(dateStr) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let rawSheet = ss.getSheetByName("Raw Data");
-  
-  // Auto-create Raw Data sheet if it doesn't exist
-  if (!rawSheet) {
-    Logger.log('⚠️ Raw Data sheet not found - creating it now...');
-    rawSheet = ss.insertSheet("Raw Data");
-    rawSheet.getRange("A1:H1").setValues([[
-      "Network ID", "Advertiser", "Campaign", "Placement", 
-      "Start Date", "End Date", "Cost Structure", "Report Date"
-    ]]).setFontWeight("bold");
-    Logger.log('✅ Raw Data sheet created');
-  }
-  
-  // Format dates for Gmail search: YYYY/MM/DD
-  const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const gmailDateStr = `${year}/${month}/${day}`;
-  
-  // Get next day for before: parameter
-  const nextDay = new Date(date);
-  nextDay.setDate(nextDay.getDate() + 1);
-  const nextYear = nextDay.getFullYear();
-  const nextMonth = String(nextDay.getMonth() + 1).padStart(2, '0');
-  const nextDayNum = String(nextDay.getDate()).padStart(2, '0');
-  const gmailNextDate = `${nextYear}/${nextMonth}/${nextDayNum}`;
-  
-  const searchQuery = `subject:"BKCM360 Global QA Check" after:${gmailDateStr} before:${gmailNextDate} has:attachment`;
-  
-  Logger.log(`📧 Searching Gmail: ${searchQuery}`);
-  const threads = GmailApp.search(searchQuery);
-  
-  if (threads.length === 0) {
-    return {
-      success: false,
-      error: `No emails found for ${gmailDateStr}. Check if emails exist with subject "BKCM360 Global QA Check".`
-    };
-  }
-  
-  Logger.log(`Found ${threads.length} email thread(s)`);
-  
-  let filesProcessed = 0;
-  let currentRow = 2;
-  
-  for (const thread of threads) {
-    const messages = thread.getMessages();
-    
-    for (const message of messages) {
-      const attachments = message.getAttachments();
-      
-      for (const attachment of attachments) {
-        const filename = attachment.getName();
-        const lowerFilename = filename.toLowerCase();
-        
-        if (lowerFilename.endsWith('.csv')) {
-          try {
-            const content = attachment.getDataAsString();
-            const networkId = filename.split('_')[0]; // Extract NetworkID from filename
-            const rows = processCSV(content, networkId);
-            
-            if (rows.length > 0) {
-              rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
-              currentRow += rows.length;
-              filesProcessed++;
-              Logger.log(`  ✅ ${filename} (${rows.length} rows)`);
-            }
-          } catch (error) {
-            Logger.log(`  ❌ Error processing ${filename}: ${error}`);
-          }
-        } else if (lowerFilename.endsWith('.zip')) {
-          try {
-            const zipBlob = attachment.copyBlob();
-            const unzipped = Utilities.unzip(zipBlob);
-            
-            for (const file of unzipped) {
-              const unzippedName = file.getName().toLowerCase();
-              if (unzippedName.endsWith('.csv')) {
-                const content = file.getDataAsString();
-                const networkId = file.getName().split('_')[0];
-                const rows = processCSV(content, networkId);
-                
-                if (rows.length > 0) {
-                  rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
-                  currentRow += rows.length;
-                  filesProcessed++;
-                  Logger.log(`  ✅ (ZIP) ${file.getName()} (${rows.length} rows)`);
-                }
-              }
-            }
-          } catch (error) {
-            Logger.log(`  ❌ Error processing ZIP ${filename}: ${error}`);
-          }
-        }
-      }
-    }
-  }
-  
-  if (filesProcessed === 0) {
-    return {
-      success: false,
-      error: `Found ${threads.length} email(s) but no CSV/ZIP attachments could be processed.`
-    };
-  }
-  
-  return {
-    success: true,
-    filesProcessed: filesProcessed,
-    source: 'Gmail'
-  };
-}
 
 /**
  * Save violations report to Drive
