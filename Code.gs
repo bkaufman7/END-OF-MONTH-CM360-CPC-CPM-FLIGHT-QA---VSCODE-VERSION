@@ -1136,8 +1136,13 @@ function runQAOnly() {
     }
 
     const startTime = Date.now();
-    const today = new Date();
-    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    
+    // Determine the report date from the data (use first data row's report date)
+    // This ensures historical data is processed with the correct date context
+    const reportDate = data.length > 1 && data[1][m["Report Date"]] 
+      ? new Date(data[1][m["Report Date"]]) 
+      : new Date();
+    const firstOfMonth = new Date(reportDate.getFullYear(), reportDate.getMonth(), 1);
 
     // ���� Tweak these constants in your file (outside this function) ����
     // const QA_CHUNK_ROWS = 3500;
@@ -1286,7 +1291,7 @@ function runQAOnly() {
     }
 
     // Persist violation-change snapshot
-    cleanupViolationCache_(vMap, today);
+    cleanupViolationCache_(vMap, reportDate);
     saveViolationChangeMap_(vMap);
 
     // Write this chunk's rows
