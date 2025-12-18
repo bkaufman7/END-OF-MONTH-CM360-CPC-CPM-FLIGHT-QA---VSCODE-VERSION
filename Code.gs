@@ -186,10 +186,12 @@ function clearViolations() {
   if (!sheet) {
     Logger.log('⚠️ Violations sheet not found - creating it now...');
     sheet = ss.insertSheet("Violations");
-    sheet.getRange("A1:O1").setValues([[
-      "Network", "Advertiser", "Campaign", "Placement", "Placement ID",
-      "Start Date", "End Date", "Cost Structure", "Issue Type", 
-      "Owner", "Severity", "$ at Risk", "Low Priority", "Report Date", "Notes"
+    sheet.getRange("A1:Y1").setValues([[
+      "Network ID", "Report Date", "Advertiser", "Campaign", "Campaign Start Date", "Campaign End Date",
+      "Ad", "Placement ID", "Placement", "Placement Start Date", "Placement End Date",
+      "Impressions", "Clicks", "CTR (%)", "Days Until Placement End", "Flight Completion %",
+      "Days Left in the Month", "CPC Risk", "$CPC", "$CPM", "Issue Type", "Details",
+      "Last Imp Change", "Last Click Change", "Owner (Ops)"
     ]]).setFontWeight("bold");
     Logger.log('✅ Violations sheet created');
     return; // Nothing to clear on new sheet
@@ -1097,10 +1099,12 @@ function runQAOnly() {
     if (!out) {
       Logger.log('⚠️ Violations sheet not found - creating it now...');
       out = ss.insertSheet("Violations");
-      out.getRange("A1:O1").setValues([[
-        "Network", "Advertiser", "Campaign", "Placement", "Placement ID",
-        "Start Date", "End Date", "Cost Structure", "Issue Type", 
-        "Owner", "Severity", "$ at Risk", "Low Priority", "Report Date", "Notes"
+      out.getRange("A1:Y1").setValues([[
+        "Network ID", "Report Date", "Advertiser", "Campaign", "Campaign Start Date", "Campaign End Date",
+        "Ad", "Placement ID", "Placement", "Placement Start Date", "Placement End Date",
+        "Impressions", "Clicks", "CTR (%)", "Days Until Placement End", "Flight Completion %",
+        "Days Left in the Month", "CPC Risk", "$CPC", "$CPM", "Issue Type", "Details",
+        "Last Imp Change", "Last Click Change", "Owner (Ops)"
       ]]).setFontWeight("bold");
       Logger.log('✅ Violations sheet created');
     }
@@ -1262,39 +1266,14 @@ function runQAOnly() {
 
       const ownerOps = resolveRep_(ownerMap, String(row[m["Network ID"]] || ""), adv) || "Unassigned";
 
-      // Determine cost structure from data
-      const costStructure = (isCPMOnly) ? "CPM" : (isCPCOnly) ? "CPC" : 
-                           (row[m["Cost Structure"]] || "");
-      
-      // Calculate severity and at-risk amount
-      const atRisk = Math.max(cpc, cpm);
-      const severity = (atRisk >= 50) ? "��️ Critical" :
-                       (atRisk >= 20) ? "⚠️ High" :
-                       (atRisk >= 10) ? "� Medium" : "� Low";
-      
-      // Determine low priority
-      const isLowPriority = issueTypes.some(it => it.includes("Low Priority")) ? "Yes" : "No";
-      
-      // Build violations row matching 15-column format:
-      // Network | Advertiser | Campaign | Placement | Placement ID | 
-      // Start Date | End Date | Cost Structure | Issue Type | 
-      // Owner | Severity | $ at Risk | Low Priority | Report Date | Notes
+      // Build violations row matching 25-column format
       resultsChunk.push([
-        row[m["Network ID"]],           // Network
-        row[m["Advertiser"]],           // Advertiser
-        row[m["Campaign"]],             // Campaign
-        row[m["Placement"]],            // Placement
-        row[m["Placement ID"]],         // Placement ID
-        row[m["Placement Start Date"]], // Start Date
-        row[m["Placement End Date"]],   // End Date
-        costStructure,                  // Cost Structure
-        issueTypes.join(", "),          // Issue Type
-        ownerOps,                       // Owner
-        severity,                       // Severity
-        "$" + atRisk.toFixed(2),        // $ at Risk
-        isLowPriority,                  // Low Priority
-        row[m["Report Date"]],          // Report Date
-        details.join(" | ")             // Notes
+        row[m["Network ID"]], row[m["Report Date"]], row[m["Advertiser"]], row[m["Campaign"]],
+        row[m["Campaign Start Date"]], row[m["Campaign End Date"]], row[m["Ad"]], row[m["Placement ID"]],
+        row[m["Placement"]], row[m["Placement Start Date"]], row[m["Placement End Date"]],
+        imp, clk, ctr.toFixed(2) + "%", daysRem, pctComplete.toFixed(1) + "%", daysLeft,
+        risk, "$" + cpc.toFixed(2), "$" + cpm.toFixed(2), issueTypes.join(", "), details.join(" | "),
+        lastImpDays, lastClkDays, ownerOps
       ]);
 
       processed++;
