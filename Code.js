@@ -6751,36 +6751,49 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
     };
   }
   
-  const rootFolderId = '1F53lLe3z5cup338IRY4nhTZQdUmJ9_wk';
+  // Parse date from dateStr (e.g., "Wed Apr 23 2025 00:00:00 GMT-0400")
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // 1-12
+  const day = date.getDate();
+  
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthFolder = `${String(month).padStart(2, '0')}-${monthNames[month - 1]}`;
+  const formattedDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  
+  // Navigate: Root/2025/04-April/
+  const rootFolderId = '1zxX1_hNSO6vMUYfL6Dzwc5--p5LuINpq';
   const rootFolder = DriveApp.getFolderById(rootFolderId);
   
-  let violationsReportsFolder;
-  const vFolders = rootFolder.getFoldersByName('Violations Reports');
-  if (vFolders.hasNext()) {
-    violationsReportsFolder = vFolders.next();
+  // Get/Create year folder (e.g., "2025")
+  let yearFolder;
+  const yFolders = rootFolder.getFoldersByName(String(year));
+  if (yFolders.hasNext()) {
+    yearFolder = yFolders.next();
   } else {
-    violationsReportsFolder = rootFolder.createFolder('Violations Reports');
+    yearFolder = rootFolder.createFolder(String(year));
   }
   
-  const yearMonth = dateStr.substring(0, 7);
-  let monthFolder;
-  const mFolders = violationsReportsFolder.getFoldersByName(yearMonth);
+  // Get/Create month folder (e.g., "04-April")
+  let targetMonthFolder;
+  const mFolders = yearFolder.getFoldersByName(monthFolder);
   if (mFolders.hasNext()) {
-    monthFolder = mFolders.next();
+    targetMonthFolder = mFolders.next();
   } else {
-    monthFolder = violationsReportsFolder.createFolder(yearMonth);
+    targetMonthFolder = yearFolder.createFolder(monthFolder);
   }
   
-  const filename = `Violations_${dateStr}.xlsx`;
+  const filename = `CM360_Report_${formattedDate}.xlsx`;
   const xlsxBlob = createXLSXFromSheet(violationsSheet);
   xlsxBlob.setName(filename);
   
-  const existingFiles = monthFolder.getFilesByName(filename);
+  const existingFiles = targetMonthFolder.getFilesByName(filename);
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);
   }
   
-  const file = monthFolder.createFile(xlsxBlob);
+  const file = targetMonthFolder.createFile(xlsxBlob);
   const fileUrl = file.getUrl();
   
   Logger.log(`� Saved violations report: ${filename} (${violationCount} violations)`);
@@ -6788,7 +6801,7 @@ function saveViolationsReportToDrive_(dateStr, violationCount) {
   return {
     success: true,
     filename: filename,
-    folderPath: `Violations Reports/${yearMonth}`,
+    folderPath: `${year}/${monthFolder}`,
     fileUrl: fileUrl
   };
 }
