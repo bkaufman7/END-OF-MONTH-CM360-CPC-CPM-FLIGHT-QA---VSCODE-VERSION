@@ -6537,6 +6537,8 @@ function importDCMReportsForDate_(dateStr) {
   const formattedDate = `${year}/${month}/${day}`;
   const reportDateForCSV = `${year}-${month}-${day}`; // For processCSV
   
+  Logger.log(`📅 Processing date: ${dateStr} → Report Date for CSV: ${reportDateForCSV}`);
+  
   // Get next day for before: parameter
   const nextDay = new Date(date);
   nextDay.setDate(nextDay.getDate() + 1);
@@ -6651,6 +6653,8 @@ function downloadRawDataFromDrive_(dateStr) {
     const month = date.getMonth() + 1; // 1-12
     const day = date.getDate();
     const reportDateForCSV = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    
+    Logger.log(`📅 Processing date: ${dateStr} → Report Date for CSV: ${reportDateForCSV}`);
     
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                         'July', 'August', 'September', 'October', 'November', 'December'];
