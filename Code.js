@@ -227,14 +227,15 @@ function extractNetworkId(fileName) {
 // ---------------------
 // processCSV
 // ---------------------
-function processCSV(fileContent, networkId) {
+function processCSV(fileContent, networkId, reportDate) {
   const lines = fileContent.split("\n").map(line => line.trim()).filter(Boolean);
   const startIndex = lines.findIndex(line => line.startsWith("Advertiser"));
   if (startIndex === -1) return [];
   const csvData = Utilities.parseCsv(lines.slice(startIndex).join("\n"));
   csvData.shift(); // remove header row in the attachment
-  const reportDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
-  return csvData.map(function(row){ return [networkId].concat(row).concat([reportDate]); });
+  // Use passed reportDate or default to today
+  const formattedDate = reportDate || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  return csvData.map(function(row){ return [networkId].concat(row).concat([formattedDate]); });
 }
 
 function importDCMReports() {
@@ -6534,6 +6535,7 @@ function importDCMReportsForDate_(dateStr) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   const formattedDate = `${year}/${month}/${day}`;
+  const reportDateForCSV = `${year}-${month}-${day}`; // For processCSV
   
   // Get next day for before: parameter
   const nextDay = new Date(date);
@@ -6571,8 +6573,8 @@ function importDCMReportsForDate_(dateStr) {
         
         try {
           if (att.getContentType() === "text/csv" || filename.endsWith(".csv")) {
-            // Process CSV directly
-            const csvData = processCSV(att.getDataAsString(), netId);
+            // Process CSV directly with correct report date
+            const csvData = processCSV(att.getDataAsString(), netId, reportDateForCSV);
             extractedData = extractedData.concat(csvData);
             filesProcessed++;
             Logger.log(`  ✅ ${filename} (${csvData.length} rows, Network ${netId})`);
@@ -6583,7 +6585,7 @@ function importDCMReportsForDate_(dateStr) {
               const unzippedName = file.getName();
               if (file.getContentType() === "text/csv" || unzippedName.endsWith(".csv")) {
                 const unzippedNetId = extractNetworkId(unzippedName);
-                const csvData = processCSV(file.getDataAsString(), unzippedNetId);
+                const csvData = processCSV(file.getDataAsString(), unzippedNetId, reportDateForCSV);
                 extractedData = extractedData.concat(csvData);
                 filesProcessed++;
                 Logger.log(`  ✅ (ZIP) ${unzippedName} (${csvData.length} rows, Network ${unzippedNetId})`);
@@ -6648,6 +6650,7 @@ function downloadRawDataFromDrive_(dateStr) {
     const year = date.getFullYear();
     const month = date.getMonth() + 1; // 1-12
     const day = date.getDate();
+    const reportDateForCSV = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                         'July', 'August', 'September', 'October', 'November', 'December'];
@@ -6709,7 +6712,7 @@ function downloadRawDataFromDrive_(dateStr) {
         // Example: "1068_BKCM360_Global_QA_Check_20250801_005620_5225494517.csv" → "1068"
         const networkId = filename.split('_')[0];
         
-        const rows = processCSV(content, networkId);
+        const rows = processCSV(content, networkId, reportDateForCSV);
         
         if (rows.length > 0) {
           rawSheet.getRange(currentRow, 1, rows.length, rows[0].length).setValues(rows);
